@@ -1,0 +1,210 @@
+// Digital Legacy Vault — Prisma schema
+// Sprint 1 deliverable: complete data model for the whole app (per backlog),
+// even though only User / RefreshToken are exercised by auth logic this sprint.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ---------- Enums ----------
+
+enum CapsuleType {
+  DOCUMENT
+  CREDENTIAL
+  MESSAGE
+}
+
+// Mirrors RM10 exactly: 7 states, one `state` column, no parallel booleans.
+enum CapsuleState {
+  DRAFT
+  ACTIVE
+  INACTIVITY_ALERT
+  PENDING_VALIDATION
+  UNLOCKED
+  REVOKED
+  ARCHIVED
+}
+
+enum NotificationType {
+  GUARANTOR_ASSIGNED
+  INACTIVITY_ALERT
+  VALIDATION_REQUEST
+  CAPSULE_UNLOCKED
+  CAPSULE_ACCESS_ATTEMPT
+}
+
+// ---------- Core identity ----------
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  fullName     String
+
+  // TOTP MFA (Sprint 1)
+  mfaSecret    String? // encrypted at rest in a later hardening pass; null until enrolled
+  mfaEnabled   Boolean  @default(false)
+
+  // Used by the inactivity engine in Sprint 3, tracked from Sprint 1 on every authenticated request
+  lastLoginAt  DateTime?
+  lastSeenAt   DateTime?
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  refreshTokens        RefreshToken[]
+  capsulesAsTestator   Capsule[]            @relation("TestatorCapsules")
+  guarantorOf          CapsuleGuarantor[]
+  beneficiaryOf        CapsuleBeneficiary[]
+  validations          Validation[]
+  auditLogs            AuditLog[]
+  notifications        Notification[]
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id              String    @id @default(uuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Never store the raw token — only a hash of it (see src/utils/password.js hashToken)
+  tokenHash       String    @unique
+  expiresAt       DateTime
+  revokedAt       DateTime?
+  replacedByToken String?   // rotation chain, for reuse/theft detection
+
+  createdByIp     String?
+  userAgent       String?
+
+  createdAt       DateTime  @default(now())
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+// ---------- Capsule domain (modeled now, built out from Sprint 2 onward) ----------
+
+model Capsule {
+  id          String       @id @default(uuid())
+  testatorId  String
+  testator    User         @relation("TestatorCapsules", fields: [testatorId], references: [id])
+
+  title       String
+  type        CapsuleType
+  state       CapsuleState @default(DRAFT)
+
+  // Client-side encrypted blob only — server/DB never sees plaintext (RM2, RM9).
+  encryptedContent Bytes?
+
+  // RM4 / RM10 parameters
+  inactivityThresholdDays Int @default(90)
+  graceWindowDays         Int @default(14)
+  validationThreshold     Int @default(2)
+  validationsReceived     Int @default(0)
+
+  lastActivityCheckAt DateTime?
+  alertSentAt         DateTime?
+  graceWindowExpiresAt DateTime?
+  unlockedAt          DateTime?
+  archivedAt           DateTime?
+  revokedAt            DateTime?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  guarantors    CapsuleGuarantor[]
+  beneficiaries CapsuleBeneficiary[]
+  validations   Validation[]
+  auditLogs     AuditLog[]
+
+  @@index([testatorId])
+  @@index([state])
+  @@map("capsules")
+}
+
+model CapsuleGuarantor {
+  id         String   @id @default(uuid())
+  capsuleId  String
+  capsule    Capsule  @relation(fields: [capsuleId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+
+  invitedAt  DateTime @default(now())
+
+  @@unique([capsuleId, userId]) // a user is a guarantor at most once per capsule
+  @@map("capsule_guarantors")
+}
+
+model CapsuleBeneficiary {
+  id         String   @id @default(uuid())
+  capsuleId  String
+  capsule    Capsule  @relation(fields: [capsuleId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+
+  invitedAt  DateTime @default(now())
+  firstAccessedAt DateTime? // triggers UNLOCKED -> ARCHIVED (RM10) on first successful read
+
+  @@unique([capsuleId, userId])
+  @@map("capsule_beneficiaries")
+}
+
+model Validation {
+  id          String   @id @default(uuid())
+  capsuleId   String
+  capsule     Capsule  @relation(fields: [capsuleId], references: [id], onDelete: Cascade)
+  guarantorId String
+  guarantor   User     @relation(fields: [guarantorId], references: [id])
+
+  validatedAt DateTime @default(now())
+
+  // RM6: a guarantor can only validate once per capsule — enforced at the DB level.
+  @@unique([capsuleId, guarantorId])
+  @@map("validations")
+}
+
+// ---------- Cross-cutting: audit + notifications ----------
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id])
+  capsuleId  String?
+  capsule    Capsule? @relation(fields: [capsuleId], references: [id])
+
+  action     String   // e.g. "USER_REGISTERED", "CAPSULE_CREATED", "VALIDATION_SUBMITTED"
+  metadata   Json?
+
+  // Hash-chaining (Sprint 5): each row hashes its own content + the previous row's hash.
+  prevHash   String?
+  hash       String?
+
+  createdAt  DateTime @default(now())
+
+  @@index([capsuleId])
+  @@index([userId])
+  @@map("audit_logs")
+}
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id])
+
+  type      NotificationType
+  payload   Json?
+  sentAt    DateTime?
+  readAt    DateTime?
+
+  createdAt DateTime         @default(now())
+
+  @@index([userId])
+  @@map("notifications")
+}
