@@ -27,7 +27,7 @@ async function register({ email, password, fullName }) {
     data: { email, passwordHash, fullName },
   });
 
-  await writeAuditLog({ userId: user.id, action: "USER_REGISTERED" });
+  writeAuditLog({ userId: user.id, action: "USER_REGISTERED" });
   return sanitizeUser(user);
 }
 
@@ -43,7 +43,7 @@ async function login({ email, password, mfaToken }, meta) {
       return { mfaRequired: true };
     }
     if (!verifyToken(mfaToken, user.mfaSecret)) {
-      await writeAuditLog({ userId: user.id, action: "MFA_LOGIN_REJECTED" });
+      writeAuditLog({ userId: user.id, action: "MFA_LOGIN_REJECTED" });
       throw new ApiError(401, "Invalid MFA code.");
     }
   }
@@ -56,7 +56,7 @@ async function login({ email, password, mfaToken }, meta) {
   const accessToken = signAccessToken(user);
   const refreshToken = await issueRefreshToken(user.id, meta);
 
-  await writeAuditLog({ userId: user.id, action: "USER_LOGGED_IN", metadata: { ip: meta.ip } });
+  writeAuditLog({ userId: user.id, action: "USER_LOGGED_IN", metadata: { ip: meta.ip } });
 
   return { user: sanitizeUser(user), accessToken, refreshToken, mfaRequired: false };
 }
@@ -87,7 +87,7 @@ async function confirmMfaEnrollment(userId, token) {
   if (!verifyToken(token, user.mfaSecret)) throw new ApiError(400, "Invalid MFA code.");
 
   const updated = await prisma.user.update({ where: { id: userId }, data: { mfaEnabled: true } });
-  await writeAuditLog({ userId, action: "MFA_ENABLED" });
+  writeAuditLog({ userId, action: "MFA_ENABLED" });
 
   // Reissue the access token so its mfaEnabled claim is correct immediately,
   // instead of staying stale until the next /refresh.
@@ -108,7 +108,7 @@ async function disableMfaEnrollment(userId, token) {
     where: { id: userId },
     data: { mfaEnabled: false, mfaSecret: null },
   });
-  await writeAuditLog({ userId, action: "MFA_DISABLED" });
+  writeAuditLog({ userId, action: "MFA_DISABLED" });
 
   const accessToken = signAccessToken(updated);
   return { mfaEnabled: false, accessToken };
@@ -134,7 +134,7 @@ async function getMe(userId) {
 
 async function logout(rawRefreshToken, userId) {
   await revokeRefreshToken(rawRefreshToken);
-  await writeAuditLog({ userId, action: "USER_LOGGED_OUT" });
+  writeAuditLog({ userId, action: "USER_LOGGED_OUT" });
 }
 
 // The access token's claims (including mfaEnabled) are a snapshot from whenever it was
