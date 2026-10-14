@@ -20,3 +20,8 @@ export const mfaConfirmRequest = (token) =>
 
 export const mfaDisableRequest = (token) =>
   client.post("/auth/mfa/disable", { token }).then((r) => r.data);
+
+export const verifyEmailRequest = ({ email, code }) =>
+  client
+    .post("/auth/verify-email", { email, code })
+    .then((response) => response.data);

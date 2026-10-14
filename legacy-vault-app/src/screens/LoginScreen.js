@@ -17,11 +17,34 @@ export default function LoginScreen({ navigation }) {
       }
       // If MFA isn't required, isAuthenticated flips to true and RootNavigator
       // swaps to the app stack automatically — no manual navigation needed.
+
+
     } catch (err) {
-      Alert.alert("Login failed", err.response?.data?.error?.message || "Check your details and try again.");
+      const status = err.response?.status;
+      const data = err.response?.data;
+
+      console.log("Login failed:", status, data);
+
+      const errorMessage =
+        data?.error?.message ||
+        data?.message ||
+        "";
+
+      if (status === 403 && errorMessage === "EMAIL_NOT_VERIFIED") {
+        navigation.navigate("VerifyEmail", {
+          email: email.trim().toLowerCase(),
+        });
+        return;
+      }
+
+      Alert.alert(
+        "Login failed",
+        errorMessage || "Something went wrong. Please try again."
+      );
     } finally {
       setSubmitting(false);
     }
+
   };
 
   return (

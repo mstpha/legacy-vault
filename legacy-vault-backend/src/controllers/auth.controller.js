@@ -4,14 +4,17 @@ function meta(req) {
   return { ip: req.ip, userAgent: req.headers["user-agent"] };
 }
 
-async function register(req, res, next) {
+const register = async (req, res, next) => {
   try {
-    const user = await authService.register(req.body);
-    res.status(201).json({ user });
-  } catch (err) {
-    next(err);
+    const result = await authService.register(req.body);
+
+    return res.status(201).json(result);
+  } catch (error) {
+    return next(error);
   }
-}
+};
+
+
 
 async function login(req, res, next) {
   try {
@@ -52,6 +55,18 @@ async function disableMfa(req, res, next) {
   }
 }
 
+
+
+const verifyEmail = async (req, res, next) => {
+  try {
+    const result = await authService.verifyEmail(req.body);
+    return res.status(200).json(result);
+  } catch (error) {
+    return next(error);
+  }
+};
+
+
 async function refresh(req, res, next) {
   try {
     const result = await authService.refresh(req.body.refreshToken, meta(req));
@@ -81,4 +96,4 @@ async function me(req, res, next) {
   }
 }
 
-module.exports = { register, login, beginMfaEnrollment, confirmMfaEnrollment, disableMfa, refresh, logout, me };
+module.exports = { register, login, beginMfaEnrollment, confirmMfaEnrollment,verifyEmail, disableMfa, refresh, logout, me };

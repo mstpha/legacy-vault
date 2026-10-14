@@ -1,7 +1,8 @@
 const express = require("express");
 const controller = require("../controllers/capsule.controller");
+const keysController = require("../controllers/keys.controller");
 const { requireAuth } = require("../middleware/requireAuth");
-const { validationLimiter, unlockLimiter } = require("../middleware/sensitiveLimiters");
+const { validationLimiter, unlockLimiter, keyChangeLimiter } = require("../middleware/sensitiveLimiters");
 const {
   createCapsuleSchema,
   updateCapsuleSchema,
@@ -25,7 +26,12 @@ router.get("/:id/shared", controller.getShared);
 router.get("/:id/shared/content", unlockLimiter, controller.getSharedContent);
 router.get("/:id/shared/files/:fileId", unlockLimiter, controller.getSharedFile);
 router.post("/:id/shared/confirm-read", unlockLimiter, controller.confirmRead);
+router.get("/:id/shared/key", unlockLimiter, keysController.getSharedKey);
 router.post("/:id/validate", validationLimiter, controller.validateAsGuarantor);
+
+// Owner side of device-key sharing (the passphrase is sealed to each beneficiary's public key on the owner's phone).
+router.get("/:id/key-recipients", keysController.listRecipients);
+router.put("/:id/key-shares", keyChangeLimiter, keysController.saveShares);
 
 router.get("/:id", controller.getOne);
 router.get("/:id/content", controller.getContent);

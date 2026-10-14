@@ -247,9 +247,11 @@ async function removeBeneficiary(capsuleId, testatorId, beneficiaryUserId) {
     getOwnedDraftCapsule(capsuleId, testatorId),
   ]);
 
-  await prisma.capsuleBeneficiary.delete({
-    where: { capsuleId_userId: { capsuleId, userId: beneficiaryUserId } },
-  });
+  await Promise.all([
+    prisma.capsuleBeneficiary.delete({ where: { capsuleId_userId: { capsuleId, userId: beneficiaryUserId } } }),
+    // A removed beneficiary must not keep a sealed copy of the passphrase.
+    prisma.capsuleKeyShare.deleteMany({ where: { capsuleId, userId: beneficiaryUserId } }),
+  ]);
   writeAuditLog({ userId: testatorId, capsuleId, action: "BENEFICIARY_REMOVED", metadata: { beneficiaryId: beneficiaryUserId } });
 }
 
@@ -363,7 +365,7 @@ async function attachFile(capsuleId, testatorId, { fileName, mimeType, encrypted
 // What a guarantor or beneficiary is allowed to see about a capsule they're named on.
 // Never includes the content blob. File names only appear once it's unlocked.
 async function getSharedCapsule(capsuleId, userId) {
-  const [capsule, guarantorRow, beneficiaryRow, hasContent, myValidation, [guarantorBlocked]] = await Promise.all([
+  const [capsule, guarantorRow, beneficiaryRow, hasContent, myValidation, [guarantorBlocked], keyShare] = await Promise.all([
     prisma.capsule.findUnique({
       where: { id: capsuleId },
       select: {
@@ -384,6 +386,7 @@ async function getSharedCapsule(capsuleId, userId) {
     hasStoredContent(capsuleId),
     prisma.validation.findUnique({ where: { capsuleId_guarantorId: { capsuleId, guarantorId: userId } } }),
     checkPermissions("GUARANTOR", ["capsule.view_assigned"]),
+    prisma.capsuleKeyShare.findUnique({ where: { capsuleId_userId: { capsuleId, userId } }, select: { id: true } }),
   ]);
 
   if (!capsule || (!guarantorRow && !beneficiaryRow)) throw new ApiError(404, "Capsule not found.");
@@ -408,6 +411,7 @@ async function getSharedCapsule(capsuleId, userId) {
     canValidate: isGuarantor && capsule.state === "PENDING_VALIDATION" && !myValidation,
     hasContent,
     canViewContent: isBeneficiary && unlocked && hasContent,
+    hasKeyShare: isBeneficiary && unlocked && !!keyShare,
     files: isBeneficiary && unlocked ? capsule.files : [],
   };
 }

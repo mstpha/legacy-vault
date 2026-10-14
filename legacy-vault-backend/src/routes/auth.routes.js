@@ -16,6 +16,7 @@ router.post("/register", authLimiter, validate(registerSchema), controller.regis
 router.post("/login", authLimiter, validate(loginSchema), controller.login);
 router.post("/refresh", authLimiter, validate(refreshSchema), controller.refresh);
 router.post("/logout", requireAuth, validate(refreshSchema), controller.logout);
+router.post("/verify-email", authLimiter, controller.verifyEmail);
 
 // MFA enrollment: user must already be logged in (with a valid access token) to enroll.
 router.post("/mfa/setup", requireAuth, authLimiter, controller.beginMfaEnrollment);

@@ -34,4 +34,11 @@ const unlockLimiter = makeLimiter({
   message: "Too many attempts to open this capsule. Please wait a few minutes and try again.",
 });
 
-module.exports = { validationLimiter, unlockLimiter };
+// Registering / replacing / removing a device key (account-takeover attackers would try to swap it).
+const keyChangeLimiter = makeLimiter({
+  max: 10,
+  windowMinutes: 60,
+  message: "Too many device key changes. Please try again later.",
+});
+
+module.exports = { validationLimiter, unlockLimiter, keyChangeLimiter };

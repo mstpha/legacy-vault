@@ -4,7 +4,7 @@ const rateLimit = require("express-rate-limit");
 // Swap the `store` option for a RedisStore (rate-limit-redis) once you run
 // more than one API instance — the package is already in package.json.
 const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
+  windowMs: 30 * 60 * 1000, // 15 minutes
   max: 10, // 10 attempts / window / IP on login, register, MFA verify
   standardHeaders: true,
   legacyHeaders: false,

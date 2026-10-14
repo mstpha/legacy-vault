@@ -12,12 +12,14 @@ export default function RegisterScreen({ navigation }) {
   const canSubmit = fullName.trim().length >= 2 && email.trim() && password.length >= 10;
 
   const onSubmit = async () => {
+    const normalizedEmail = email.trim().toLowerCase();
+
     setSubmitting(true);
     try {
       await register({ email: email.trim().toLowerCase(), password, fullName: fullName.trim() });
-      Alert.alert("Account created", "You can now log in.", [
-        { text: "OK", onPress: () => navigation.replace("Login") },
-      ]);
+      navigation.navigate("VerifyEmail", {
+        email: normalizedEmail,
+      });
     } catch (err) {
       const details = err.response?.data?.error?.details;
       const message =

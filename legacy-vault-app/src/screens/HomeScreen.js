@@ -4,6 +4,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import { useAuth } from "../context/AuthContext";
 import { listCapsulesRequest } from "../api/capsule.api";
+import { getSecuritySummary } from "../utils/deviceKeys";
 
 function getGreeting() {
   const hour = new Date().getHours();
@@ -26,6 +27,22 @@ export default function HomeScreen({ navigation }) {
 
   // How many capsules are waiting on this user as guarantor / beneficiary (shown as badges).
   const [waiting, setWaiting] = useState({ guarantor: 0, beneficiary: 0 });
+  // App lock + device key status for the "Device security" card.
+  const [security, setSecurity] = useState(null);
+
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      if (user?.id) {
+        getSecuritySummary(user.id)
+          .then((summary) => active && setSecurity(summary))
+          .catch(() => {});
+      }
+      return () => {
+        active = false;
+      };
+    }, [user?.id])
+  );
 
   useFocusEffect(
     useCallback(() => {
@@ -141,6 +158,25 @@ export default function HomeScreen({ navigation }) {
         <Ionicons name="chevron-forward" size={18} color="#d1d5db" />
       </Pressable>
 
+      {/* --- Device security: phone biometric lock + device key --- */}
+      <Pressable
+        style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
+        onPress={() => navigation.navigate("SecuritySettings")}
+      >
+        <View style={[styles.iconBadge, security?.lockEnabled && security?.keyActive ? styles.iconBadgeGreen : styles.iconBadgeTeal]}>
+          <Ionicons name="finger-print" size={22} color="#fff" />
+        </View>
+        <View style={styles.cardBody}>
+          <Text style={styles.cardTitle}>Device security</Text>
+          <Text style={styles.cardSubtitle}>
+            {security
+              ? `App lock ${security.lockEnabled ? "on" : "off"} · Device key ${security.keyActive ? "active" : "not set up"}`
+              : "Fingerprint / face lock and device key"}
+          </Text>
+        </View>
+        <Ionicons name="chevron-forward" size={18} color="#d1d5db" />
+      </Pressable>
+
       {/* --- Admin: only rendered at all for admins, distinct purple treatment --- */}
       {isAdmin && (
         <>
@@ -155,6 +191,20 @@ export default function HomeScreen({ navigation }) {
             <View style={styles.cardBody}>
               <Text style={styles.cardTitle}>Roles & Permissions</Text>
               <Text style={styles.cardSubtitle}>Control what testators, guarantors & beneficiaries can do</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color="#d1d5db" />
+          </Pressable>
+
+          <Pressable
+            style={({ pressed }) => [styles.card, styles.adminCard, pressed && styles.cardPressed]}
+            onPress={() => navigation.navigate("AuditLog")}
+          >
+            <View style={[styles.iconBadge, styles.iconBadgePurple]}>
+              <Ionicons name="document-text" size={20} color="#fff" />
+            </View>
+            <View style={styles.cardBody}>
+              <Text style={styles.cardTitle}>Audit log</Text>
+              <Text style={styles.cardSubtitle}>Tamper-evident history of every sensitive action</Text>
             </View>
             <Ionicons name="chevron-forward" size={18} color="#d1d5db" />
           </Pressable>
@@ -231,6 +281,7 @@ const styles = StyleSheet.create({
   iconBadgePurple: { backgroundColor: "#a855f7" },
   iconBadgeViolet: { backgroundColor: "#6366f1" },
   iconBadgeSky: { backgroundColor: "#0ea5e9" },
+  iconBadgeTeal: { backgroundColor: "#14b8a6" },
 
   countBadge: { minWidth: 22, height: 22, borderRadius: 11, paddingHorizontal: 6, backgroundColor: "#ef4444", alignItems: "center", justifyContent: "center", marginRight: 8 },
   countBadgeText: { color: "#fff", fontSize: 12, fontWeight: "700" },

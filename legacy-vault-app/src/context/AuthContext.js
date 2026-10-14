@@ -49,26 +49,45 @@ export function AuthProvider({ children }) {
   }, []);
 
   // Bootstrap: try to resume a session from stored tokens on app start.
-  useEffect(() => {
-    (async () => {
+
+useEffect(() => {
+  let active = true;
+
+  async function bootstrap() {
+    try {
       const storedRefresh = await getItem(STORAGE_KEYS.REFRESH_TOKEN);
-      if (!storedRefresh) {
-        setIsLoading(false);
-        return;
-      }
-      try {
-        const newAccess = await refreshTokens();
-        setAccessToken(newAccess);
-        const me = await authApi.meRequest();
+
+      if (!storedRefresh) return;
+
+      const newAccess = await refreshTokens();
+
+      if (!active) return;
+
+      setAccessToken(newAccess);
+
+      const me = await authApi.meRequest();
+
+      if (active) {
         setUser(me);
-      } catch (err) {
+      }
+    } catch (err) {
+      if (active) {
         await clearSession();
-      } finally {
+      }
+    } finally {
+      if (active) {
         setIsLoading(false);
       }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    }
+  }
+
+  bootstrap();
+
+  return () => {
+    active = false;
+  };
+}, [refreshTokens, clearSession]);
+
 
   const register = useCallback(({ email, password, fullName }) => {
     return authApi.registerRequest({ email, password, fullName });
@@ -101,16 +120,38 @@ export function AuthProvider({ children }) {
 
   const cancelMfaLogin = useCallback(() => setPendingCredentials(null), []);
 
-  const logout = useCallback(async () => {
-    try {
-      const storedRefresh = await getItem(STORAGE_KEYS.REFRESH_TOKEN);
-      if (storedRefresh) await authApi.logoutRequest(storedRefresh);
-    } catch (err) {
-      // Best-effort server-side revoke — clear the local session regardless.
-    } finally {
-      await clearSession();
-    }
-  }, [clearSession]);
+const verifyEmail = useCallback(
+  ({ email, code }) => authApi.verifyEmailRequest({ email, code }),
+  []
+);
+
+const logout = useCallback(async () => {
+  // Read the refresh token before deleting locally stored credentials.
+  const refreshTokenPromise = getItem(STORAGE_KEYS.REFRESH_TOKEN).catch(
+    () => null
+  );
+
+  // Immediately update React state so the authenticated UI can disappear.
+  setUser(null);
+  setAccessToken(null);
+  setPendingCredentials(null);
+
+  // Clear local credentials without waiting for the server.
+  await Promise.all([
+    deleteItem(STORAGE_KEYS.ACCESS_TOKEN).catch(() => {}),
+    deleteItem(STORAGE_KEYS.REFRESH_TOKEN).catch(() => {}),
+  ]);
+
+  const storedRefresh = await refreshTokenPromise;
+
+  // Server-side revocation is best-effort and must not block the UI.
+  if (storedRefresh) {
+    authApi.logoutRequest(storedRefresh).catch(() => {
+      // The local session is already cleared.
+    });
+  }
+}, []);
+
 
   const refreshMe = useCallback(async () => {
     const me = await authApi.meRequest();
@@ -135,6 +176,7 @@ export function AuthProvider({ children }) {
       login,
       submitMfaCode,
       cancelMfaLogin,
+      verifyEmail,
       logout,
       refreshMe,
       applyAccessToken,
@@ -148,6 +190,7 @@ export function AuthProvider({ children }) {
       login,
       submitMfaCode,
       cancelMfaLogin,
+      verifyEmail,
       logout,
       refreshMe,
       applyAccessToken,

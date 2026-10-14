@@ -33,6 +33,7 @@ alter table validations           enable row level security;
 alter table audit_logs            enable row level security;
 alter table notifications         enable row level security;
 alter table role_permissions      enable row level security;
+alter table capsule_key_shares    enable row level security;
 
 do $$
 begin
@@ -91,12 +92,13 @@ grant execute on function private.is_testator(text), private.is_guarantor(text),
 
 -- 5. Read access, column by column ---------------------------------------------------------
 -- users: only your own row; never passwordHash or mfaSecret.
-grant select (id, email, "fullName", "mfaEnabled", role, "lastLoginAt", "lastSeenAt", "createdAt", "updatedAt")
+grant select (id, email, "fullName", "mfaEnabled", role, "publicKey", "publicKeyUpdatedAt", "lastLoginAt", "lastSeenAt", "createdAt", "updatedAt")
   on users to authenticated;
 create policy users_select_self on users for select to authenticated
   using (id = auth.uid()::text);
 
--- refresh_tokens: no grants and no policy = unreachable from the REST API.
+-- refresh_tokens and capsule_key_shares: no grants and no policy = unreachable from the REST API.
+-- (capsule_key_shares only holds passphrases sealed to a recipient's device key; they are served by the API only.)
 
 -- capsules: status fields only. encryptedContent is NEVER granted: the content is only
 -- served by the API, which checks the state (UNLOCKED/ARCHIVED), the role and the permission

@@ -57,67 +57,93 @@ enum NotificationType {
 // ---------- Core identity ----------
 
 model User {
-  id           String   @id @default(uuid())
-  email        String   @unique
+  id           String @id @default(uuid())
+  email        String @unique
   passwordHash String
   fullName     String
 
   // TOTP MFA (Sprint 1)
-  mfaSecret    String? // encrypted at rest in a later hardening pass; null until enrolled
-  mfaEnabled   Boolean  @default(false)
+  mfaSecret  String? // encrypted at rest in a later hardening pass; null until enrolled
+  mfaEnabled Boolean @default(false)
 
   // Global account flag. Everyone starts TESTATOR (meaning "ordinary user" — they
   // can still also act as a guarantor/beneficiary on other people's capsules
   // regardless of this field). Only ADMIN unlocks the Roles & Permissions page.
-  role         Role     @default(TESTATOR)
+  role Role @default(TESTATOR)
 
   // Used by the inactivity engine in Sprint 3, tracked from Sprint 1 on every authenticated request
-  lastLoginAt  DateTime?
-  lastSeenAt   DateTime?
+  lastLoginAt DateTime?
+  lastSeenAt  DateTime?
 
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  refreshTokens        RefreshToken[]
-  capsulesAsTestator   Capsule[]            @relation("TestatorCapsules")
-  guarantorOf          CapsuleGuarantor[]
-  beneficiaryOf        CapsuleBeneficiary[]
-  validations          Validation[]
-  notifications        Notification[]
+  publicKey          String?
+  publicKeyUpdatedAt DateTime? @db.Timestamp(3)
+
+
+  emailVerified             Boolean   @default(false)
+  emailVerificationCodeHash String?
+  emailVerificationExpiresAt DateTime?
+  emailVerificationAttempts Int       @default(0)
+
+  refreshTokens      RefreshToken[]
+  capsulesAsTestator Capsule[]            @relation("TestatorCapsules")
+  capsuleKeyShares   CapsuleKeyShare[]
+  guarantorOf        CapsuleGuarantor[]
+  beneficiaryOf      CapsuleBeneficiary[]
+  validations        Validation[]
+  notifications      Notification[]
 
   @@map("users")
 }
 
 model RefreshToken {
-  id              String    @id @default(uuid())
-  userId          String
-  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   // Never store the raw token — only a hash of it (see src/utils/password.js hashToken)
   tokenHash       String    @unique
   expiresAt       DateTime
   revokedAt       DateTime?
-  replacedByToken String?   // rotation chain, for reuse/theft detection
+  replacedByToken String? // rotation chain, for reuse/theft detection
 
-  createdByIp     String?
-  userAgent       String?
+  createdByIp String?
+  userAgent   String?
 
-  createdAt       DateTime  @default(now())
+  createdAt DateTime @default(now())
 
   @@index([userId])
   @@map("refresh_tokens")
 }
 
+model CapsuleKeyShare {
+  id         String @id @default(uuid())
+  capsuleId  String
+  userId     String
+  wrappedKey String
+
+  createdAt DateTime @default(now()) @db.Timestamp(3)
+  updatedAt DateTime @default(now()) @db.Timestamp(3)
+
+  capsule Capsule @relation(fields: [capsuleId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([capsuleId, userId])
+  @@map("capsule_key_shares")
+}
+
 // ---------- Capsule domain (modeled now, built out from Sprint 2 onward) ----------
 
 model Capsule {
-  id          String       @id @default(uuid())
-  testatorId  String
-  testator    User         @relation("TestatorCapsules", fields: [testatorId], references: [id])
+  id         String @id @default(uuid())
+  testatorId String
+  testator   User   @relation("TestatorCapsules", fields: [testatorId], references: [id])
 
-  title       String
-  type        CapsuleType
-  state       CapsuleState @default(DRAFT)
+  title String
+  type  CapsuleType
+  state CapsuleState @default(DRAFT)
 
   // Client-side encrypted blob only — server/DB never sees plaintext (RM2, RM9).
   encryptedContent Bytes?
@@ -128,18 +154,19 @@ model Capsule {
   validationThreshold     Int @default(2)
   validationsReceived     Int @default(0)
 
-  lastActivityCheckAt DateTime?
-  alertSentAt         DateTime?
+  lastActivityCheckAt  DateTime?
+  alertSentAt          DateTime?
   graceWindowExpiresAt DateTime?
-  unlockedAt          DateTime?
+  unlockedAt           DateTime?
   archivedAt           DateTime?
   revokedAt            DateTime?
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   guarantors    CapsuleGuarantor[]
   beneficiaries CapsuleBeneficiary[]
+  keyShares     CapsuleKeyShare[]
   validations   Validation[]
   files         CapsuleFile[]
 
@@ -151,42 +178,42 @@ model Capsule {
 // One row per attached file. The bytes themselves live in Supabase Storage
 // (already encrypted client-side) — this table only tracks the pointer + metadata.
 model CapsuleFile {
-  id          String   @id @default(uuid())
-  capsuleId   String
-  capsule     Capsule  @relation(fields: [capsuleId], references: [id], onDelete: Cascade)
+  id        String  @id @default(uuid())
+  capsuleId String
+  capsule   Capsule @relation(fields: [capsuleId], references: [id], onDelete: Cascade)
 
   storagePath String // path within the Supabase Storage bucket
   fileName    String
   mimeType    String // the ORIGINAL file's mime type; the stored bytes are opaque ciphertext
   sizeBytes   Int
 
-  createdAt   DateTime @default(now())
+  createdAt DateTime @default(now())
 
   @@index([capsuleId])
   @@map("capsule_files")
 }
 
 model CapsuleGuarantor {
-  id         String   @id @default(uuid())
-  capsuleId  String
-  capsule    Capsule  @relation(fields: [capsuleId], references: [id], onDelete: Cascade)
-  userId     String
-  user       User     @relation(fields: [userId], references: [id])
+  id        String  @id @default(uuid())
+  capsuleId String
+  capsule   Capsule @relation(fields: [capsuleId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User    @relation(fields: [userId], references: [id])
 
-  invitedAt  DateTime @default(now())
+  invitedAt DateTime @default(now())
 
   @@unique([capsuleId, userId]) // a user is a guarantor at most once per capsule
   @@map("capsule_guarantors")
 }
 
 model CapsuleBeneficiary {
-  id         String   @id @default(uuid())
-  capsuleId  String
-  capsule    Capsule  @relation(fields: [capsuleId], references: [id], onDelete: Cascade)
-  userId     String
-  user       User     @relation(fields: [userId], references: [id])
+  id        String  @id @default(uuid())
+  capsuleId String
+  capsule   Capsule @relation(fields: [capsuleId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User    @relation(fields: [userId], references: [id])
 
-  invitedAt  DateTime @default(now())
+  invitedAt       DateTime  @default(now())
   firstAccessedAt DateTime? // triggers UNLOCKED -> ARCHIVED (RM10) on first successful read
 
   @@unique([capsuleId, userId])
@@ -194,11 +221,11 @@ model CapsuleBeneficiary {
 }
 
 model Validation {
-  id          String   @id @default(uuid())
+  id          String  @id @default(uuid())
   capsuleId   String
-  capsule     Capsule  @relation(fields: [capsuleId], references: [id], onDelete: Cascade)
+  capsule     Capsule @relation(fields: [capsuleId], references: [id], onDelete: Cascade)
   guarantorId String
-  guarantor   User     @relation(fields: [guarantorId], references: [id])
+  guarantor   User    @relation(fields: [guarantorId], references: [id])
 
   validatedAt DateTime @default(now())
 
@@ -225,19 +252,17 @@ model AuditLog {
   @@map("audit_logs")
 }
 
-
-
 model Notification {
-  id        String           @id @default(uuid())
-  userId    String
-  user      User             @relation(fields: [userId], references: [id])
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
 
-  type      NotificationType
-  payload   Json?
-  sentAt    DateTime?
-  readAt    DateTime?
+  type    NotificationType
+  payload Json?
+  sentAt  DateTime?
+  readAt  DateTime?
 
-  createdAt DateTime         @default(now())
+  createdAt DateTime @default(now())
 
   @@index([userId])
   @@map("notifications")

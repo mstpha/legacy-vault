@@ -1,5 +1,8 @@
 const prisma = require("../config/db");
 const logger = require("../config/logger");
+const crypto = require("crypto");
+const { renderEmail } = require("../utils/emailTemplate");
+const { sendEmail } = require("../config/mailer");
 const { hashPassword, verifyPassword } = require("../utils/password");
 const { generateSecret, verifyToken, generateQrCodeDataUrl } = require("./mfa.service");
 const {
@@ -18,23 +21,82 @@ async function writeAuditLog({ userId, action, metadata }) {
   });
 }
 
-async function register({ email, password, fullName }) {
-  const existing = await prisma.user.findUnique({ where: { email } });
-  if (existing) throw new ApiError(409, "An account with this email already exists.");
 
-  const passwordHash = await hashPassword(password);
-  const user = await prisma.user.create({
-    data: { email, passwordHash, fullName },
+async function register({ email, password, fullName }) {
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  const normalizedName = String(fullName || "").trim();
+
+  if (!normalizedEmail || !password || !normalizedName) {
+    throw new ApiError(400, "Name, email, and password are required.");
+  }
+
+  const existingUser = await prisma.user.findUnique({
+    where: { email: normalizedEmail },
   });
 
-  writeAuditLog({ userId: user.id, action: "USER_REGISTERED" });
-  return sanitizeUser(user);
+  if (existingUser) {
+    throw new ApiError(409, "An account with this email already exists.");
+  }
+
+  const passwordHash = await hashPassword(password);
+  const code = crypto.randomInt(100000, 1000000).toString();
+  const emailVerificationCodeHash = await hashPassword(code);
+  const emailVerificationExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+  const user = await prisma.user.create({
+    data: {
+      email: normalizedEmail,
+      passwordHash,
+      fullName: normalizedName,
+      emailVerified: false,
+      emailVerificationCodeHash,
+      emailVerificationExpiresAt,
+      emailVerificationAttempts: 0,
+    },
+  });
+
+  const { html, text } = renderEmail({
+    recipientName: normalizedName,
+    title: "Verify your email address",
+    message: `Your Digital Legacy Vault verification code is ${code}. It expires in 10 minutes. If you did not create this account, you can ignore this email.`,
+    tone: "info",
+  });
+
+  const delivery = await sendEmail({
+    to: normalizedEmail,
+    subject: "Verify your Digital Legacy Vault email",
+    html,
+    text,
+    category: "Email Verification",
+  });
+
+  if (!delivery?.sent) {
+    // Keep the account so the user can request another code later.
+    throw new ApiError(
+      503,
+      "Your account was created, but the verification email could not be sent. Please request a new code."
+    );
+  }
+
+  return {
+    message: "Account created. Check your email for the six-digit verification code.",
+    email: normalizedEmail,
+  };
 }
+
 
 async function login({ email, password, mfaToken }, meta) {
   const user = await prisma.user.findUnique({ where: { email } });
   if (!user || !(await verifyPassword(password, user.passwordHash))) {
     throw new ApiError(401, "Invalid email or password.");
+  }
+
+  if (!user.emailVerified) {
+    await sendVerificationCode(user);
+    throw new ApiError(
+      403,
+      "EMAIL_NOT_VERIFIED"
+    );
   }
 
   if (user.mfaEnabled) {
@@ -59,6 +121,109 @@ async function login({ email, password, mfaToken }, meta) {
   writeAuditLog({ userId: user.id, action: "USER_LOGGED_IN", metadata: { ip: meta.ip } });
 
   return { user: sanitizeUser(user), accessToken, refreshToken, mfaRequired: false };
+}
+
+
+
+
+async function verifyEmail({ email, code }) {
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  const normalizedCode = String(code || "").trim();
+
+  if (!normalizedEmail || !/^\d{6}$/.test(normalizedCode)) {
+    throw new ApiError(400, "Enter a valid six-digit verification code.");
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { email: normalizedEmail },
+  });
+
+  if (!user || user.emailVerified) {
+    throw new ApiError(400, "Invalid or expired verification code.");
+  }
+
+  if (
+    !user.emailVerificationCodeHash ||
+    !user.emailVerificationExpiresAt ||
+    user.emailVerificationExpiresAt <= new Date() ||
+    user.emailVerificationAttempts >= 5
+  ) {
+    throw new ApiError(400, "Invalid or expired verification code.");
+  }
+
+  // Use your existing password verification helper.
+  const validCode = await verifyPassword(
+    normalizedCode,
+    user.emailVerificationCodeHash
+  );
+
+  if (!validCode) {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { emailVerificationAttempts: { increment: 1 } },
+    });
+
+    throw new ApiError(400, "Invalid or expired verification code.");
+  }
+
+  await prisma.user.update({
+    where: { id: user.id },
+    data: {
+      emailVerified: true,
+      emailVerificationCodeHash: null,
+      emailVerificationExpiresAt: null,
+      emailVerificationAttempts: 0,
+    },
+  });
+
+  // If your project uses audit logging, record EMAIL_VERIFIED here.
+
+  return { message: "Email verified successfully. You can now log in." };
+}
+
+async function sendVerificationCode(user) {
+  const crypto = require("crypto");
+
+  const code = crypto.randomInt(100000, 1000000).toString();
+  const codeHash = await hashPassword(code);
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+  await prisma.user.update({
+    where: { id: user.id },
+    data: {
+      emailVerified: false,
+      emailVerificationCodeHash: codeHash,
+      emailVerificationExpiresAt: expiresAt,
+      emailVerificationAttempts: 0,
+    },
+  });
+
+  const { html, text } = renderEmail({
+    recipientName: user.fullName,
+    title: "Verify your email address",
+    message: `Your Digital Legacy Vault verification code is ${code}. It expires in 10 minutes.`,
+    tone: "info",
+  });
+
+  const delivery = await sendEmail({
+    to: user.email,
+    subject: "Verify your Digital Legacy Vault email",
+    html,
+    text,
+    category: "Email Verification",
+  });
+
+  if (!delivery?.sent) {
+    throw new ApiError(
+      503,
+      "We couldn't send your verification email. Please try again."
+    );
+  }
+
+  return {
+    message: "A new verification code has been sent to your email.",
+    email: user.email,
+  };
 }
 
 // Step 1: generate + persist a secret (not yet "enabled"), return the QR code to scan.
@@ -154,6 +319,7 @@ function sanitizeUser(user) {
 
 module.exports = {
   register,
+  verifyEmail,
   login,
   beginMfaEnrollment,
   confirmMfaEnrollment,

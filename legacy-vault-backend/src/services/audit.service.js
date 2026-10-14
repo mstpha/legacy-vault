@@ -1,7 +1,8 @@
 const crypto = require("crypto");
 const prisma = require("../config/db");
 const logger = require("../config/logger");
-const { writeAuditLog } = require("./audit.service");
+const { ApiError } = require("../middleware/errorHandler");
+
 // Tamper-evident audit log (Sprint 5).
 //
 // Every entry stores:   hash = SHA-256( prevHash + this entry's own content )
@@ -47,6 +48,42 @@ function computeHash({ prevHash, userId, capsuleId, action, createdAt, metadata 
 
 // Appends one entry to the chain. Never throws: an audit failure must not block the
 // action that triggered it, but it is logged loudly so it can't go unnoticed.
+async function writeAuditLog({ userId, capsuleId, action, metadata }) {
+  try {
+    await prisma.$transaction(
+      async (tx) => {
+        // One writer at a time, otherwise two concurrent entries could both build on the
+        // same "previous" hash and fork the chain. The lock is released automatically at COMMIT.
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(${CHAIN_LOCK_ID})`;
+
+        const last = await tx.auditLog.findFirst({
+          where: { hash: { not: null } },
+          orderBy: { seq: "desc" },
+          select: { hash: true },
+        });
+
+        const prevHash = last ? last.hash : GENESIS;
+        const createdAt = new Date();
+        const hash = computeHash({ prevHash, userId, capsuleId, action, createdAt, metadata });
+
+        await tx.auditLog.create({
+          data: {
+            userId: userId || null,
+            capsuleId: capsuleId || null,
+            action,
+            metadata: metadata ?? undefined,
+            prevHash,
+            hash,
+            createdAt,
+          },
+        });
+      },
+      { maxWait: 10000, timeout: 15000 }
+    );
+  } catch (err) {
+    logger.error("Failed to write audit log", { action, err: err.message });
+  }
+}
 
 // Pure check of consecutive rows (ascending seq) against the running state.
 // Returns the first problem found, or null if every row is consistent.
@@ -107,4 +144,70 @@ async function verifyAuditChain() {
   return { valid: true, checked: state.checked, legacyUnchained, brokenAt: null };
 }
 
-module.exports = { writeAuditLog, verifyAuditChain, computeHash, checkRows, GENESIS };
+// --- Reading the log (admin screen) -----------------------------------------------------
+
+// Filter groups used by the admin screen. Actions not listed here still show under "all".
+const ACTION_GROUPS = {
+  accounts: ["USER_REGISTERED", "USER_LOGGED_IN", "USER_LOGGED_OUT", "MFA_ENABLED", "MFA_DISABLED", "MFA_LOGIN_REJECTED"],
+  capsules: [
+    "CAPSULE_CREATED", "CAPSULE_UPDATED", "CAPSULE_DELETED", "CAPSULE_ACTIVATED", "CAPSULE_REVOKED", "THRESHOLDS_UPDATED",
+    "FILE_ATTACHED", "GUARANTOR_ADDED", "GUARANTOR_REMOVED", "BENEFICIARY_ADDED", "BENEFICIARY_REMOVED", "ACTIVITY_CONFIRMED",
+  ],
+  lifecycle: ["INACTIVITY_ALERT_TRIGGERED", "ESCALATED_TO_PENDING_VALIDATION", "VALIDATION_SUBMITTED", "CAPSULE_UNLOCKED"],
+  access: [
+    "CAPSULE_CONTENT_ACCESSED", "FILE_DOWNLOADED", "CAPSULE_FIRST_ACCESS", "CAPSULE_ARCHIVED", "ACCESS_ATTEMPT_BLOCKED", "KEY_SHARE_DELIVERED",
+  ],
+  security: ["PERMISSION_CHANGED", "PUBLIC_KEY_REGISTERED", "PUBLIC_KEY_CHANGED", "PUBLIC_KEY_REMOVED", "KEY_SHARES_UPDATED"],
+};
+
+// Newest first, 30 at a time. `before` is the seq of the last entry already shown.
+async function listAuditEntries({ before, limit, group, capsuleId } = {}) {
+  const take = Math.min(Math.max(parseInt(limit, 10) || 30, 1), 100);
+
+  const where = {};
+  if (before !== undefined && before !== "") {
+    const cursor = Number(before);
+    if (!Number.isInteger(cursor) || cursor < 1) throw new ApiError(400, "before must be a positive whole number.");
+    where.seq = { lt: cursor };
+  }
+  if (group) {
+    if (!ACTION_GROUPS[group]) throw new ApiError(400, `Unknown group "${group}".`);
+    where.action = { in: ACTION_GROUPS[group] };
+  }
+  if (capsuleId) {
+    if (typeof capsuleId !== "string" || capsuleId.length > 64) throw new ApiError(400, "Invalid capsuleId.");
+    where.capsuleId = capsuleId;
+  }
+
+  const rows = await prisma.auditLog.findMany({ where, orderBy: { seq: "desc" }, take: take + 1 });
+  const hasMore = rows.length > take;
+  const page = hasMore ? rows.slice(0, take) : rows;
+
+  // The log keeps plain ids (no foreign keys, so history survives deletions): look up names here.
+  const userIds = [...new Set(page.map((r) => r.userId).filter(Boolean))];
+  const capsuleIds = [...new Set(page.map((r) => r.capsuleId).filter(Boolean))];
+  const [users, capsules] = await Promise.all([
+    userIds.length ? prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, email: true, fullName: true } }) : [],
+    capsuleIds.length ? prisma.capsule.findMany({ where: { id: { in: capsuleIds } }, select: { id: true, title: true } }) : [],
+  ]);
+  const userById = new Map(users.map((u) => [u.id, u]));
+  const capsuleById = new Map(capsules.map((c) => [c.id, c]));
+
+  return {
+    entries: page.map((r) => ({
+      seq: r.seq,
+      createdAt: r.createdAt,
+      action: r.action,
+      userId: r.userId,
+      userEmail: userById.get(r.userId)?.email || null,
+      userName: userById.get(r.userId)?.fullName || null,
+      capsuleId: r.capsuleId,
+      capsuleTitle: capsuleById.get(r.capsuleId)?.title || null, // null = deleted, or no capsule involved
+      metadata: r.metadata || null,
+      chained: !!r.hash, // false for entries from before the hash chain existed
+    })),
+    nextCursor: hasMore ? page[page.length - 1].seq : null,
+  };
+}
+
+module.exports = { writeAuditLog, verifyAuditChain, listAuditEntries, ACTION_GROUPS, computeHash, checkRows, GENESIS };

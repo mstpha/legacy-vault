@@ -1,6 +1,7 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import { View, Text, TextInput, Pressable, StyleSheet, Alert, ActivityIndicator, ScrollView } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
+import { usePreventScreenCapture } from "expo-screen-capture";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
 import {
@@ -10,7 +11,11 @@ import {
   confirmFirstReadRequest,
   getSharedFileRequest,
 } from "../api/capsule.api";
+import { getSharedKeyRequest } from "../api/keys.api";
 import { decryptText, decryptToBase64 } from "../utils/encryption";
+import { confirmSensitive } from "../utils/biometricLock";
+import { openWithDeviceKey } from "../utils/deviceKeys";
+import { useAuth } from "../context/AuthContext";
 import { readViaFetch } from "../utils/readFile";
 
 const STATE_LABELS = {
@@ -68,6 +73,11 @@ export default function SharedCapsuleScreen({ route, navigation }) {
   const [content, setContent] = useState(null);
   const [fileBusyId, setFileBusyId] = useState(null);
 
+  usePreventScreenCapture(); // no screenshots / screen recording of decrypted content
+  const { user } = useAuth();
+  const [deviceBusy, setDeviceBusy] = useState(false);
+  const decryptedFiles = useRef([]); // decrypted copies written to the cache: deleted when the screen is left
+
   const load = useCallback(async () => {
     try {
       setCapsule(await getSharedCapsuleRequest(capsuleId));
@@ -83,6 +93,20 @@ export default function SharedCapsuleScreen({ route, navigation }) {
     useCallback(() => {
       load();
     }, [load])
+  );
+
+  // Don't leave decrypted text, the passphrase or decrypted files behind once the screen is left.
+  useFocusEffect(
+    useCallback(
+      () => () => {
+        setContent(null);
+        setPassphrase("");
+        setBlob(null);
+        decryptedFiles.current.forEach((uri) => FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {}));
+        decryptedFiles.current = [];
+      },
+      []
+    )
   );
 
   if (loading || !capsule) {
@@ -124,7 +148,13 @@ export default function SharedCapsuleScreen({ route, navigation }) {
       `Only validate if you can confirm that ${owner} is unable to manage this capsule. This can't be undone, and when enough guarantors validate, the capsule unlocks for the beneficiaries.`,
       [
         { text: "Cancel", style: "cancel" },
-        { text: "I confirm, validate", style: "destructive", onPress: submitValidation },
+        {
+          text: "I confirm, validate",
+          style: "destructive",
+          onPress: async () => {
+            if (await confirmSensitive(user.id, "Confirm your validation")) submitValidation();
+          },
+        },
       ]
     );
 
@@ -133,8 +163,9 @@ export default function SharedCapsuleScreen({ route, navigation }) {
   // the capsule ("Opened"); after that you can still read it as often as you like.
   const confirmRead = () => confirmFirstReadRequest(capsuleId).then(load).catch(() => {});
 
-  const onOpenText = async () => {
+  const onOpenText = async (pp = passphrase, alreadyAuthenticated = false) => {
     if (opening) return;
+    if (!alreadyAuthenticated && !(await confirmSensitive(user.id, "Confirm to open this capsule"))) return;
     setOpening(true);
     try {
       let encrypted = blob;
@@ -154,7 +185,7 @@ export default function SharedCapsuleScreen({ route, navigation }) {
 
       await paint();
       try {
-        setContent(decryptText(encrypted, passphrase));
+        setContent(decryptText(encrypted, pp));
         confirmRead();
       } catch (err) {
         Alert.alert("Could not decrypt", "Wrong passphrase, or the content is corrupted.");
@@ -166,21 +197,23 @@ export default function SharedCapsuleScreen({ route, navigation }) {
 
   // Downloads the ENCRYPTED file, decrypts it on this device, then hands it to the share sheet
   // (open / save to Files / send to another app).
-  const onOpenFile = async (file) => {
+  const onOpenFile = async (file, pp = passphrase, alreadyAuthenticated = false) => {
     if (fileBusyId) return;
-    if (!passphrase) return Alert.alert("Passphrase needed", "Enter the passphrase above first.");
+    if (!pp) return Alert.alert("Passphrase needed", "Enter the passphrase above, or unlock with your device key.");
+    if (!alreadyAuthenticated && !(await confirmSensitive(user.id, "Confirm to open this file"))) return;
     setFileBusyId(file.id);
     try {
       const { url } = await getSharedFileRequest(capsuleId, file.id);
       const encrypted = await readViaFetch(url);
       await paint();
 
-      const base64 = decryptToBase64(encrypted, passphrase);
+      const base64 = decryptToBase64(encrypted, pp);
       if (!base64) throw new Error("empty result");
 
       const safeName = file.fileName.replace(/[^\w.\- ]/g, "_");
       const uri = `${FileSystem.cacheDirectory}${safeName}`;
       await FileSystem.writeAsStringAsync(uri, base64, { encoding: FileSystem.EncodingType.Base64 });
+      decryptedFiles.current.push(uri);
       confirmRead();
 
       if (await Sharing.isAvailableAsync()) {
@@ -195,6 +228,29 @@ export default function SharedCapsuleScreen({ route, navigation }) {
       );
     } finally {
       setFileBusyId(null);
+    }
+  };
+
+  // Opens the sealed passphrase with THIS phone's private key (the biometric prompt appears here).
+  const onUnlockWithDevice = async () => {
+    if (deviceBusy || opening) return;
+    setDeviceBusy(true);
+    try {
+      const { wrappedKey } = await getSharedKeyRequest(capsuleId);
+      const unsealed = await openWithDeviceKey(user.id, wrappedKey, "Unlock this capsule with your device key");
+      setPassphrase(unsealed);
+      if (capsule.hasContent) await onOpenText(unsealed, true);
+      else Alert.alert("Unlocked", "Your device key worked. Tap Open next to a file to decrypt it.");
+    } catch (err) {
+      if (err.code === "AUTH_CANCELLED") return;
+      const reasons = {
+        KEY_MISSING: "This phone has no device key. Create one under Device security, or enter the passphrase instead.",
+        KEY_UNREADABLE: "This phone's device key can't be read (biometrics may have changed). Enter the passphrase instead.",
+        WRONG_KEY: "The key shared with you doesn't match this phone's key. Ask the owner to share again, or enter the passphrase.",
+      };
+      Alert.alert("Device key didn't work", reasons[err.code] || err.response?.data?.error?.message || "Enter the passphrase instead.");
+    } finally {
+      setDeviceBusy(false);
     }
   };
 
@@ -265,6 +321,18 @@ export default function SharedCapsuleScreen({ route, navigation }) {
             <Text style={styles.body}>This capsule has no content.</Text>
           ) : (
             <>
+              {capsule.hasKeyShare && (
+                <>
+                  <Pressable
+                    style={[styles.primary, (deviceBusy || opening) && styles.dimmed]}
+                    onPress={onUnlockWithDevice}
+                    disabled={deviceBusy || opening}
+                  >
+                    {deviceBusy ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>Unlock with this device</Text>}
+                  </Pressable>
+                  <Text style={styles.orText}>or enter the passphrase</Text>
+                </>
+              )}
               <Text style={styles.hint}>
                 Read-only. You can open this as often as you like. The content is encrypted: enter the passphrase{" "}
                 {owner} gave you, and it's decrypted on this device only.
@@ -281,7 +349,7 @@ export default function SharedCapsuleScreen({ route, navigation }) {
                 {capsule.hasContent && (
                   <Pressable
                     style={[styles.openButton, (!passphrase || opening) && styles.dimmed]}
-                    onPress={onOpenText}
+                    onPress={() => onOpenText()}
                     disabled={!passphrase || opening}
                   >
                     {opening ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>Open</Text>}
@@ -337,6 +405,7 @@ const styles = StyleSheet.create({
   primary: { backgroundColor: "#0f172a", borderRadius: 10, padding: 14, alignItems: "center", marginTop: 12 },
   primaryText: { color: "#fff", fontSize: 15, fontWeight: "600" },
   dimmed: { opacity: 0.6 },
+  orText: { textAlign: "center", fontSize: 12, color: "#94a3b8", marginVertical: 12 },
   row: { flexDirection: "row", gap: 8 },
   input: { flex: 1, borderWidth: 1, borderColor: "#d1d5db", borderRadius: 8, padding: 10 },
   openButton: { backgroundColor: "#0f172a", borderRadius: 8, paddingHorizontal: 18, justifyContent: "center", alignItems: "center", minWidth: 72 },
