@@ -1,7 +1,6 @@
 import React, { useCallback, useRef, useState } from "react";
 import { View, Text, TextInput, Pressable, StyleSheet, Alert, ActivityIndicator, ScrollView } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
-import { usePreventScreenCapture } from "expo-screen-capture";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
 import {
@@ -73,7 +72,6 @@ export default function SharedCapsuleScreen({ route, navigation }) {
   const [content, setContent] = useState(null);
   const [fileBusyId, setFileBusyId] = useState(null);
 
-  usePreventScreenCapture(); // no screenshots / screen recording of decrypted content
   const { user } = useAuth();
   const [deviceBusy, setDeviceBusy] = useState(false);
   const decryptedFiles = useRef([]); // decrypted copies written to the cache: deleted when the screen is left

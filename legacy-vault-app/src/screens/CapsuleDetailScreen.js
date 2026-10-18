@@ -1,7 +1,6 @@
 import React, { useCallback, useRef, useState } from "react";
 import { View, Text, TextInput, Pressable, StyleSheet, Alert, ActivityIndicator, ScrollView } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
-import { usePreventScreenCapture } from "expo-screen-capture";
 import {
   getCapsuleRequest,
   getCapsuleContentRequest,
@@ -37,7 +36,6 @@ export default function CapsuleDetailScreen({ route, navigation }) {
   const [viewPassphrase, setViewPassphrase] = useState("");
   const [decryptedContent, setDecryptedContent] = useState(null);
 
-  usePreventScreenCapture(); // no screenshots / screen recording / app-switcher thumbnail of decrypted content
   const { user } = useAuth();
   const [recipients, setRecipients] = useState([]);
   const [sharePassphrase, setSharePassphrase] = useState("");
