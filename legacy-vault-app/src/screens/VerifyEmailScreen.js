@@ -1,15 +1,9 @@
-
 import React, { useState } from "react";
-import {
-  ActivityIndicator,
-  Alert,
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
+import { Alert, StyleSheet, Text, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../context/AuthContext";
+import { AuthLayout, CodeField, Button, LinkText } from "../components/ui";
+import { colors, radius } from "../theme";
 
 export default function VerifyEmailScreen({ route, navigation }) {
   const email = route.params?.email || "";
@@ -46,78 +40,41 @@ export default function VerifyEmailScreen({ route, navigation }) {
   };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Verify your email</Text>
-      <Text style={styles.description}>
-        Enter the six-digit code sent to {email}.
-      </Text>
-
-      <TextInput
-        style={styles.input}
-        value={code}
-        onChangeText={(value) =>
-          setCode(value.replace(/\D/g, "").slice(0, 6))
-        }
-        keyboardType="number-pad"
-        maxLength={6}
-        placeholder="000000"
-        accessibilityLabel="Six-digit email verification code"
-      />
-
-      <Pressable
-        style={[styles.button, loading && styles.disabled]}
-        onPress={handleVerify}
-        disabled={loading}
-      >
-        {loading ? (
-          <ActivityIndicator color="#fff" />
-        ) : (
-          <Text style={styles.buttonText}>Confirm email</Text>
-        )}
-      </Pressable>
-    </View>
+    <AuthLayout
+      icon="mail-open"
+      title="Check your inbox"
+      subtitle="Enter the six-digit code we just emailed you."
+      onBack={() => navigation.goBack()}
+      footer={
+        <LinkText prefix="Wrong address?" onPress={() => navigation.goBack()}>
+          Go back
+        </LinkText>
+      }
+    >
+      <View style={styles.emailChip}>
+        <Ionicons name="mail" size={15} color={colors.indigo} />
+        <Text style={styles.email} numberOfLines={1}>
+          {email}
+        </Text>
+      </View>
+      <CodeField value={code} onChangeText={setCode} accessibilityLabel="Six-digit email verification code" autoFocus />
+      <Button title="Confirm email" icon="checkmark" onPress={handleVerify} loading={loading} disabled={code.length !== 6} />
+    </AuthLayout>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: "center",
-    padding: 24,
-    backgroundColor: "#fff",
-  },
-  title: {
-    fontSize: 26,
-    fontWeight: "700",
-    marginBottom: 12,
-  },
-  description: {
-    fontSize: 16,
-    color: "#555",
-    marginBottom: 24,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: "#ccc",
-    borderRadius: 10,
-    padding: 14,
-    fontSize: 24,
-    textAlign: "center",
-    letterSpacing: 8,
-    marginBottom: 20,
-  },
-  button: {
-    backgroundColor: "#2347D8",
-    borderRadius: 10,
-    padding: 16,
+  emailChip: {
+    flexDirection: "row",
     alignItems: "center",
+    alignSelf: "center",
+    gap: 8,
+    maxWidth: "100%",
+    backgroundColor: colors.indigoSoft,
+    borderRadius: radius.pill,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    marginBottom: 22,
   },
-  disabled: {
-    opacity: 0.6,
-  },
-  buttonText: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "600",
-  },
+  email: { fontSize: 14, fontWeight: "700", color: colors.indigoInk, flexShrink: 1 },
 });

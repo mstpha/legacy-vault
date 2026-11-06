@@ -3,7 +3,7 @@ const prisma = require("../config/db");
 const logger = require("../config/logger");
 const { ApiError } = require("../middleware/errorHandler");
 const { assertPermission, checkPermissions } = require("./permissions.service");
-const { uploadEncryptedFile, getSignedDownloadUrl } = require("./storage.service");
+const { uploadEncryptedFile, getSignedDownloadUrl, deleteFiles } = require("./storage.service");
 const { createNotification } = require("./notification.service");
 
 // Hash-chained, append-only audit trail (see audit.service.js).
@@ -35,6 +35,43 @@ async function updateCapsule(capsuleId, data, forcedHasContent) {
   return { ...capsule, hasContent };
 }
 
+// Re-reads a capsule WITHOUT the blob, plus the hasContent flag.
+async function loadCapsuleView(capsuleId, forcedHasContent) {
+  const [capsule, hasContent] = await Promise.all([
+    prisma.capsule.findUnique({ where: { id: capsuleId }, select: NO_CONTENT_SELECT }),
+    forcedHasContent === undefined ? hasStoredContent(capsuleId) : Promise.resolve(forcedHasContent),
+  ]);
+  return { ...capsule, hasContent };
+}
+
+// Sprint 6: RM10 transitions are applied with a conditional UPDATE (WHERE state IN (...)), so the
+// check and the write are one atomic statement. Reading the state first and then updating blindly
+// left a window in which e.g. a revoke could overwrite an UNLOCKED capsule that a guarantor had
+// just unlocked (RM5 says revoking is only possible BEFORE UNLOCKED), or a confirm-activity could
+// race the sweep. count === 0 means "someone else moved it first".
+async function transitionState(capsuleId, fromStates, data, conflictMessage, forcedHasContent) {
+  const { count } = await prisma.capsule.updateMany({
+    where: { id: capsuleId, state: { in: fromStates } },
+    data,
+  });
+  if (count === 0) throw new ApiError(409, conflictMessage);
+  return loadCapsuleView(capsuleId, forcedHasContent);
+}
+
+// RM10 (REVOKED): "le contenu est definitivement efface". The blob column is nulled by the transition; the
+// encrypted attachments live in Supabase Storage and must go too. Best effort: the capsule is already
+// revoked and unreachable, so a storage hiccup is logged (rows are kept so a retry can find them), not surfaced.
+async function purgeCapsuleFiles(capsuleId) {
+  const files = await prisma.capsuleFile.findMany({ where: { capsuleId }, select: { storagePath: true } });
+  if (files.length === 0) return;
+  try {
+    await deleteFiles(files.map((f) => f.storagePath));
+    await prisma.capsuleFile.deleteMany({ where: { capsuleId } });
+  } catch (err) {
+    logger.error("capsule_files_purge_failed", { capsuleId, message: err.message });
+  }
+}
+
 // Notifications never block or break the action that triggered them.
 function notifyInBackground(task) {
   Promise.resolve(task).catch((err) => logger.error("notification_failed", { message: err.message }));
@@ -57,10 +94,16 @@ async function getMemberIds(capsuleId) {
 
 // Avoid spamming the testator if someone keeps hammering a locked capsule.
 const attemptThrottle = new Map();
+const ATTEMPT_THROTTLE_MS = 10 * 60 * 1000;
 function shouldNotifyAttempt(key) {
+  const now = Date.now();
   const last = attemptThrottle.get(key) || 0;
-  if (Date.now() - last < 10 * 60 * 1000) return false;
-  attemptThrottle.set(key, Date.now());
+  if (now - last < ATTEMPT_THROTTLE_MS) return false;
+  // Sprint 6: the map used to grow forever (one entry per capsule/user pair that ever knocked).
+  if (attemptThrottle.size > 5000) {
+    for (const [k, at] of attemptThrottle) if (now - at >= ATTEMPT_THROTTLE_MS) attemptThrottle.delete(k);
+  }
+  attemptThrottle.set(key, now);
   return true;
 }
 
@@ -181,7 +224,12 @@ async function deleteDraftCapsule(capsuleId, testatorId) {
     getOwnedDraftCapsule(capsuleId, testatorId),
   ]);
 
+  // The DB cascade removes the capsule_files rows, so grab the storage paths first (otherwise the objects are orphaned).
+  const files = await prisma.capsuleFile.findMany({ where: { capsuleId }, select: { storagePath: true } });
   await prisma.capsule.delete({ where: { id: capsuleId } });
+  await deleteFiles(files.map((f) => f.storagePath)).catch((err) =>
+    logger.error("capsule_files_purge_failed", { capsuleId, message: err.message })
+  );
   writeAuditLog({ userId: testatorId, capsuleId, action: "CAPSULE_DELETED" });
 }
 
@@ -286,7 +334,12 @@ async function activateCapsule(capsuleId, testatorId) {
     );
   }
 
-  const updated = await updateCapsule(capsuleId, { state: "ACTIVE", lastActivityCheckAt: new Date() });
+  const updated = await transitionState(
+    capsuleId,
+    ["DRAFT"],
+    { state: "ACTIVE", lastActivityCheckAt: new Date() },
+    "This action is only allowed while the capsule is a draft."
+  );
   writeAuditLog({ userId: testatorId, capsuleId, action: "CAPSULE_ACTIVATED" });
   return updated;
 }
@@ -302,11 +355,16 @@ async function revokeCapsule(capsuleId, testatorId) {
     throw new ApiError(409, "This capsule can no longer be revoked.");
   }
 
-  const updated = await updateCapsule(
+  const updated = await transitionState(
     capsuleId,
+    ["DRAFT", "ACTIVE", "INACTIVITY_ALERT", "PENDING_VALIDATION"],
     { state: "REVOKED", revokedAt: new Date(), encryptedContent: null },
+    "This capsule can no longer be revoked.",
     false
   );
+  // A revoked capsule must not keep sealed copies of its passphrase either (same rule as removeBeneficiary).
+  await prisma.capsuleKeyShare.deleteMany({ where: { capsuleId } });
+  await purgeCapsuleFiles(capsuleId);
   writeAuditLog({ userId: testatorId, capsuleId, action: "CAPSULE_REVOKED" });
 
   // Let guarantors and beneficiaries know it's gone.
@@ -330,12 +388,12 @@ async function confirmActivity(capsuleId, testatorId) {
   }
 
   const [updated] = await Promise.all([
-    updateCapsule(capsuleId, {
-      state: "ACTIVE",
-      alertSentAt: null,
-      graceWindowExpiresAt: null,
-      lastActivityCheckAt: new Date(),
-    }),
+    transitionState(
+      capsuleId,
+      ["INACTIVITY_ALERT"],
+      { state: "ACTIVE", alertSentAt: null, graceWindowExpiresAt: null, lastActivityCheckAt: new Date() },
+      "There is no active inactivity alert on this capsule."
+    ),
     prisma.user.update({ where: { id: testatorId }, data: { lastSeenAt: new Date() } }),
   ]);
   writeAuditLog({ userId: testatorId, capsuleId, action: "ACTIVITY_CONFIRMED" });

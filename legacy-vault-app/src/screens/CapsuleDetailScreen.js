@@ -1,5 +1,6 @@
 import React, { useCallback, useRef, useState } from "react";
 import { View, Text, TextInput, Pressable, StyleSheet, Alert, ActivityIndicator, ScrollView } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import {
   getCapsuleRequest,
@@ -19,6 +20,8 @@ import { confirmSensitive } from "../utils/biometricLock";
 import { wrapPassphraseFor } from "../utils/deviceKeys";
 import { fingerprint } from "../utils/sealedBox";
 import { useAuth } from "../context/AuthContext";
+import { Card, Field, Button, Banner, IconBadge, Pill, Loading, Hero, HeroPills, HeroPill, HeroStats, Lifecycle, Avatar, ActionBar } from "../components/ui";
+import { colors, radius, TYPE_ICONS, STATE_LABELS, STATE_COLORS } from "../theme";
 
 export default function CapsuleDetailScreen({ route, navigation }) {
   const { capsuleId } = route.params;
@@ -100,13 +103,7 @@ export default function CapsuleDetailScreen({ route, navigation }) {
     }
   };
 
-  if (loading || !capsule) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" />
-      </View>
-    );
-  }
+  if (loading || !capsule) return <Loading />;
 
   const isDraft = capsule.state === "DRAFT";
   const isAlert = capsule.state === "INACTIVITY_ALERT";
@@ -259,182 +256,299 @@ export default function CapsuleDetailScreen({ route, navigation }) {
   const disabledAll = busy || decrypting || sharing;
 
   return (
-    <ScrollView ref={scrollRef} contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-      <Text style={styles.title}>{capsule.title}</Text>
-      <Text style={styles.subtitle}>
-        {capsule.type} · {capsule.state}
-      </Text>
-
-      {isAlert && (
-        <View style={styles.alertBox}>
-          <Text style={styles.alertText}>
-            You've crossed your inactivity threshold. Confirm you're still active before the grace window expires.
-          </Text>
-          <Pressable style={styles.button} onPress={onConfirmActivity} disabled={disabledAll}>
-            <Text style={styles.buttonText}>I'm still active</Text>
-          </Pressable>
-        </View>
-      )}
-
-      {capsule.hasContent && (
-        <Section title="Content">
-          <Text style={styles.hint}>
-            Content is encrypted — enter the passphrase you set when creating it to view it here.
-          </Text>
-          <View style={styles.addRow}>
-            <TextInput
-              style={styles.addInput}
-              placeholder="Passphrase"
-              secureTextEntry
-              value={viewPassphrase}
-              onChangeText={setViewPassphrase}
-              editable={!decrypting}
-            />
-            <Pressable
-              style={[styles.addButton, (!viewPassphrase || decrypting) && styles.buttonDimmed]}
-              onPress={onDecrypt}
-              disabled={!viewPassphrase || disabledAll}
-            >
-              {decrypting ? <ActivityIndicator color="#fff" /> : <Text style={styles.addButtonText}>View</Text>}
-            </Pressable>
-          </View>
-          {decrypting && <Text style={styles.hint}>Decrypting… this can take a few seconds.</Text>}
-          {decryptedContent !== null && <Text style={styles.decryptedText}>{decryptedContent}</Text>}
-        </Section>
-      )}
-
-      <Section title="Guarantors">
-        {capsule.guarantors?.map((g) => (
-          <MemberRow
-            key={g.userId}
-            label={g.user.fullName || g.user.email}
-            onRemove={isDraft ? () => runAction(() => removeGuarantorRequest(capsuleId, g.userId)) : null}
+    <View style={styles.screen}>
+      <ScrollView ref={scrollRef} contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+        {/* --- Hero: title, type, state, key numbers --- */}
+        <Hero
+          icon={TYPE_ICONS[capsule.type] || "archive"}
+          eyebrow={`${capsule.type.charAt(0) + capsule.type.slice(1).toLowerCase()} capsule`}
+          title={capsule.title}
+        >
+          <HeroPills>
+            <HeroPill label={STATE_LABELS[capsule.state] || capsule.state} dot={STATE_COLORS[capsule.state]} />
+            {capsule.hasContent && <HeroPill label="Encrypted content" icon="lock-closed" />}
+            {capsule.files?.length > 0 && <HeroPill label={`${capsule.files.length} file${capsule.files.length > 1 ? "s" : ""}`} icon="attach" />}
+          </HeroPills>
+          <HeroStats
+            items={[
+              { value: capsule.guarantors?.length || 0, label: "Guarantors" },
+              { value: capsule.beneficiaries?.length || 0, label: "Beneficiaries" },
+              { value: `${capsule.inactivityThresholdDays}d`, label: "Inactivity" },
+            ]}
           />
-        ))}
-        {isDraft && (
-          <AddMemberRow value={guarantorEmail} onChangeText={setGuarantorEmail} onSubmit={onAddGuarantor} placeholder="Guarantor's email" />
-        )}
-      </Section>
+        </Hero>
 
-      <Section title="Beneficiaries">
-        {capsule.beneficiaries?.map((b) => (
-          <MemberRow
-            key={b.userId}
-            label={b.user.fullName || b.user.email}
-            onRemove={isDraft ? () => runAction(() => removeBeneficiaryRequest(capsuleId, b.userId)) : null}
-          />
-        ))}
-        {isDraft && (
-          <AddMemberRow value={beneficiaryEmail} onChangeText={setBeneficiaryEmail} onSubmit={onAddBeneficiary} placeholder="Beneficiary's email" />
+        {capsule.state === "REVOKED" ? (
+          <Banner tone="danger" icon="ban" title="Revoked">
+            This capsule was revoked and its content erased.
+          </Banner>
+        ) : (
+          <Card style={styles.lifeCard}>
+            <Lifecycle state={capsule.state} />
+          </Card>
         )}
-      </Section>
 
-      {canShareKeys && capsule.beneficiaries?.length > 0 && (
-        <View onLayout={(event) => (keysY.current = event.nativeEvent.layout.y)}>
-        <Section title="Device keys (no passphrase to hand over)">
-          <Text style={styles.hint}>
-            Seal this capsule's passphrase to each beneficiary's device key, on your phone. After unlock they open it with their
-            fingerprint. The server only stores a sealed copy it cannot read.
-          </Text>
-          {keysError && (
-            <View style={styles.keysError}>
-              <Text style={styles.keysErrorText}>{keysError}</Text>
-              <Pressable onPress={load}>
-                <Text style={styles.keysRetry}>Retry</Text>
-              </Pressable>
-            </View>
-          )}
-          {!keysError && recipients.length === 0 && <Text style={styles.hint}>Checking your beneficiaries' device keys...</Text>}
-          {recipients.map((r) => (
-            <View key={r.userId} style={styles.recipientRow}>
-              <Text style={styles.memberLabel}>{r.fullName || r.email}</Text>
-              <Text style={r.hasShare ? styles.shareOk : styles.shareMissing}>
-                {r.hasShare ? "Shared" : r.publicKey ? "Key ready" : "No device key yet"}
-              </Text>
-              {r.publicKey && <Text style={styles.fingerprintSmall}>{fingerprint(r.publicKey)}</Text>}
-            </View>
-          ))}
-          {shareable.length > 0 && (
-            <>
-              <TextInput
-                style={[styles.addInput, styles.shareInput]}
-                placeholder="Capsule passphrase"
+        {isAlert && (
+          <Banner tone="warning" icon="time" title="Are you still there?">
+            <Text style={styles.alertText}>
+              You've crossed your inactivity threshold. Confirm you're still active before the grace window expires.
+            </Text>
+            <Button title="I'm still active" icon="checkmark-circle" compact onPress={onConfirmActivity} disabled={disabledAll} />
+          </Banner>
+        )}
+
+        {capsule.hasContent && (
+          <Section title="Content" subtitle="Decrypted only on this phone" icon="lock-closed" color={colors.indigo}>
+            <View style={styles.addRow}>
+              <Field
+                placeholder="Passphrase"
+                icon="key-outline"
                 secureTextEntry
-                value={sharePassphrase}
-                onChangeText={setSharePassphrase}
-                editable={!sharing}
+                value={viewPassphrase}
+                onChangeText={setViewPassphrase}
+                editable={!decrypting}
+                style={styles.addField}
               />
-              <Pressable style={[styles.secondaryButton, sharing && styles.buttonDimmed]} onPress={onShareKeys} disabled={sharing || !sharePassphrase}>
-                {sharing ? <ActivityIndicator /> : <Text style={styles.secondaryButtonText}>Share with {shareable.length} device key(s)</Text>}
-              </Pressable>
-            </>
-          )}
-        </Section>
-        </View>
-      )}
-
-      <Section title="Thresholds">
-        <LabeledInput label="Inactivity delay (days)" value={inactivityDays} onChangeText={setInactivityDays} editable={isDraft} />
-        <LabeledInput label="Grace window (days)" value={graceDays} onChangeText={setGraceDays} editable={isDraft} />
-        <LabeledInput label="Guarantors required to unlock" value={threshold} onChangeText={setThreshold} editable={isDraft} />
-        {isDraft && (
-          <Pressable style={styles.secondaryButton} onPress={onSaveThresholds} disabled={disabledAll}>
-            <Text style={styles.secondaryButtonText}>Save thresholds</Text>
-          </Pressable>
+              <Button
+                title="View"
+                icon="eye"
+                compact
+                onPress={onDecrypt}
+                disabled={!viewPassphrase || disabledAll}
+                loading={decrypting}
+                style={styles.addButton}
+              />
+            </View>
+            {decrypting && <Text style={styles.hint}>Decrypting… this can take a few seconds.</Text>}
+            {decryptedContent !== null && (
+              <View style={styles.decrypted}>
+                <View style={styles.decryptedHead}>
+                  <Ionicons name="lock-open" size={13} color={colors.greenInk} />
+                  <Text style={styles.decryptedLabel}>Decrypted on this device</Text>
+                </View>
+                <Text selectable style={styles.decryptedText}>
+                  {decryptedContent}
+                </Text>
+              </View>
+            )}
+          </Section>
         )}
-      </Section>
 
-      {capsule.files?.length > 0 && (
-        <Section title="Files">
-          {capsule.files.map((f) => (
-            <Text key={f.id} style={styles.fileRow}>
-              📎 {f.fileName}
-            </Text>
+        <Section
+          title="Guarantors"
+          subtitle={`${capsule.validationThreshold} must validate to unlock`}
+          icon="shield-checkmark"
+          color={colors.indigo}
+          count={capsule.guarantors?.length}
+        >
+          {capsule.guarantors?.length === 0 && !isDraft && <Text style={styles.hint}>No guarantors.</Text>}
+          {capsule.guarantors?.map((g) => (
+            <MemberRow
+              key={g.userId}
+              name={g.user.fullName}
+              email={g.user.email}
+              onRemove={isDraft ? () => runAction(() => removeGuarantorRequest(capsuleId, g.userId)) : null}
+            />
           ))}
-        </Section>
-      )}
-      {capsule.hasContent && (
-        <Section title="Capsule Content">
-          {decryptedContent !== null ? (
-            <Text style={styles.decryptedText}>{decryptedContent}</Text>
-          ) : (
-            <Text style={styles.hint}>
-              Decrypt the content using the passphrase in the Content section above.
-            </Text>
+          {isDraft && (
+            <AddMemberRow value={guarantorEmail} onChangeText={setGuarantorEmail} onSubmit={onAddGuarantor} placeholder="Guarantor's email" />
           )}
         </Section>
-      )}
+
+        <Section
+          title="Beneficiaries"
+          subtitle="Can read the capsule once unlocked"
+          icon="gift"
+          color={colors.sky}
+          count={capsule.beneficiaries?.length}
+        >
+          {capsule.beneficiaries?.length === 0 && !isDraft && <Text style={styles.hint}>No beneficiaries.</Text>}
+          {capsule.beneficiaries?.map((b) => (
+            <MemberRow
+              key={b.userId}
+              name={b.user.fullName}
+              email={b.user.email}
+              onRemove={isDraft ? () => runAction(() => removeBeneficiaryRequest(capsuleId, b.userId)) : null}
+            />
+          ))}
+          {isDraft && (
+            <AddMemberRow value={beneficiaryEmail} onChangeText={setBeneficiaryEmail} onSubmit={onAddBeneficiary} placeholder="Beneficiary's email" />
+          )}
+        </Section>
+
+        {canShareKeys && capsule.beneficiaries?.length > 0 && (
+          <View onLayout={(event) => (keysY.current = event.nativeEvent.layout.y)}>
+            <Section title="Device keys" subtitle="No passphrase to hand over" icon="finger-print" color={colors.teal}>
+              <Text style={styles.hint}>
+                Seal this capsule's passphrase to each beneficiary's device key, on your phone. After unlock they open it with their
+                fingerprint. The server only stores a sealed copy it cannot read.
+              </Text>
+              {keysError && (
+                <Banner tone="danger">
+                  <Text style={styles.keysErrorText}>{keysError}</Text>
+                  <Pressable onPress={load} hitSlop={8}>
+                    <Text style={styles.keysRetry}>Retry</Text>
+                  </Pressable>
+                </Banner>
+              )}
+              {!keysError && recipients.length === 0 && (
+                <View style={styles.checking}>
+                  <ActivityIndicator size="small" color={colors.faint} />
+                  <Text style={styles.hintInline}>Checking your beneficiaries' device keys…</Text>
+                </View>
+              )}
+              {recipients.map((r) => (
+                <View key={r.userId} style={styles.memberRow}>
+                  <Avatar label={r.fullName || r.email} />
+                  <View style={styles.memberBody}>
+                    <Text style={styles.memberName} numberOfLines={1}>
+                      {r.fullName || r.email}
+                    </Text>
+                    {r.publicKey && <Text style={styles.fingerprintSmall}>{fingerprint(r.publicKey)}</Text>}
+                  </View>
+                  <Pill
+                    label={r.hasShare ? "Shared" : r.publicKey ? "Key ready" : "No key yet"}
+                    icon={r.hasShare ? "checkmark" : r.publicKey ? "key" : "time-outline"}
+                    color={r.hasShare ? "#16a34a" : r.publicKey ? colors.indigo : colors.faint}
+                  />
+                </View>
+              ))}
+              {shareable.length > 0 && (
+                <>
+                  <Field
+                    placeholder="Capsule passphrase"
+                    icon="key-outline"
+                    secureTextEntry
+                    value={sharePassphrase}
+                    onChangeText={setSharePassphrase}
+                    editable={!sharing}
+                    style={styles.shareField}
+                  />
+                  <Button
+                    title={`Share with ${shareable.length} device key${shareable.length === 1 ? "" : "s"}`}
+                    icon="share-social"
+                    variant="secondary"
+                    onPress={onShareKeys}
+                    disabled={sharing || !sharePassphrase}
+                    loading={sharing}
+                  />
+                </>
+              )}
+            </Section>
+          </View>
+        )}
+
+        <Section
+          title="Thresholds"
+          subtitle={isDraft ? "Editable while the capsule is a draft" : "Locked once activated"}
+          icon="options"
+          color={colors.amber}
+        >
+          <LabeledInput
+            icon="time-outline"
+            label="Inactivity delay"
+            unit="days"
+            value={inactivityDays}
+            onChangeText={setInactivityDays}
+            editable={isDraft}
+          />
+          <LabeledInput
+            icon="hourglass-outline"
+            label="Grace window"
+            unit="days"
+            value={graceDays}
+            onChangeText={setGraceDays}
+            editable={isDraft}
+          />
+          <LabeledInput
+            icon="people-outline"
+            label="Guarantors to unlock"
+            value={threshold}
+            onChangeText={setThreshold}
+            editable={isDraft}
+            last
+          />
+          {isDraft && (
+            <Button
+              title="Save thresholds"
+              icon="save-outline"
+              variant="secondary"
+              compact
+              onPress={onSaveThresholds}
+              disabled={disabledAll}
+              style={styles.saveButton}
+            />
+          )}
+        </Section>
+
+        {capsule.files?.length > 0 && (
+          <Section title="Files" subtitle="Encrypted attachments" icon="attach" color={colors.muted} count={capsule.files.length}>
+            {capsule.files.map((f, i) => (
+              <View key={f.id} style={[styles.fileRow, i === capsule.files.length - 1 && styles.lastRow]}>
+                <IconBadge name="document" color={colors.indigo} soft size={34} iconSize={16} />
+                <Text style={styles.fileName} numberOfLines={1}>
+                  {f.fileName}
+                </Text>
+                <Ionicons name="lock-closed" size={13} color={colors.ghost} />
+              </View>
+            ))}
+          </Section>
+        )}
+
+        {!["UNLOCKED", "ARCHIVED", "REVOKED"].includes(capsule.state) && (
+          <Card tone="danger" style={styles.dangerCard}>
+            <View style={styles.dangerHead}>
+              <Ionicons name="warning" size={16} color={colors.redInk} />
+              <Text style={styles.dangerTitle}>Danger zone</Text>
+            </View>
+            <Text style={styles.dangerText}>Revoking permanently erases this capsule's content. This cannot be undone.</Text>
+            <Button title="Revoke capsule" icon="trash-outline" variant="danger" compact onPress={onRevoke} disabled={disabledAll} />
+          </Card>
+        )}
+      </ScrollView>
+
       {isDraft && (
-        <Pressable style={styles.button} onPress={onActivate} disabled={disabledAll}>
-          <Text style={styles.buttonText}>Activate capsule</Text>
-        </Pressable>
+        <ActionBar>
+          <Button title="Activate capsule" icon="play-circle" onPress={onActivate} disabled={disabledAll} style={styles.flex} />
+        </ActionBar>
       )}
-
-      {!["UNLOCKED", "ARCHIVED", "REVOKED"].includes(capsule.state) && (
-        <Pressable style={styles.dangerButton} onPress={onRevoke} disabled={disabledAll}>
-          <Text style={styles.dangerButtonText}>Revoke capsule</Text>
-        </Pressable>
-      )}
-    </ScrollView>
-  );
-}
-
-function Section({ title, children }) {
-  return (
-    <View style={styles.section}>
-      <Text style={styles.sectionTitle}>{title}</Text>
-      {children}
     </View>
   );
 }
 
-function MemberRow({ label, onRemove }) {
+function Section({ title, subtitle, icon, color, count, children }) {
+  return (
+    <Card style={styles.section}>
+      <View style={styles.sectionHead}>
+        <IconBadge name={icon} color={color} soft size={36} iconSize={17} />
+        <View style={styles.sectionHeading}>
+          <Text style={styles.sectionTitle}>{title}</Text>
+          {subtitle && <Text style={styles.sectionSubtitle}>{subtitle}</Text>}
+        </View>
+        {count > 0 && <Text style={styles.sectionCount}>{count}</Text>}
+      </View>
+      {children}
+    </Card>
+  );
+}
+
+function MemberRow({ name, email, onRemove }) {
   return (
     <View style={styles.memberRow}>
-      <Text style={styles.memberLabel}>{label}</Text>
+      <Avatar label={name || email} />
+      <View style={styles.memberBody}>
+        <Text style={styles.memberName} numberOfLines={1}>
+          {name || email}
+        </Text>
+        {name && email ? (
+          <Text style={styles.memberEmail} numberOfLines={1}>
+            {email}
+          </Text>
+        ) : null}
+      </View>
       {onRemove && (
-        <Pressable onPress={onRemove}>
-          <Text style={styles.removeText}>Remove</Text>
+        <Pressable onPress={onRemove} hitSlop={10} accessibilityLabel={`Remove ${name || email}`}>
+          <Ionicons name="close-circle" size={22} color={colors.ghost} />
         </Pressable>
       )}
     </View>
@@ -444,24 +558,26 @@ function MemberRow({ label, onRemove }) {
 function AddMemberRow({ value, onChangeText, onSubmit, placeholder }) {
   return (
     <View style={styles.addRow}>
-      <TextInput
-        style={styles.addInput}
+      <Field
         placeholder={placeholder}
+        icon="mail-outline"
         autoCapitalize="none"
         keyboardType="email-address"
         value={value}
         onChangeText={onChangeText}
+        style={styles.addField}
       />
-      <Pressable style={styles.addButton} onPress={onSubmit} disabled={!value.trim()}>
-        <Text style={styles.addButtonText}>Add</Text>
-      </Pressable>
+      <Button title="Add" icon="add" compact onPress={onSubmit} disabled={!value.trim()} style={styles.addButton} />
     </View>
   );
 }
 
-function LabeledInput({ label, value, onChangeText, editable }) {
+function LabeledInput({ icon, label, unit, value, onChangeText, editable, last }) {
   return (
-    <View style={styles.labeledInputRow}>
+    <View style={[styles.labeledInputRow, last && styles.lastRow]}>
+      <View style={styles.labeledIcon}>
+        <Ionicons name={icon} size={16} color={colors.muted} />
+      </View>
       <Text style={styles.labeledInputLabel}>{label}</Text>
       <TextInput
         style={[styles.labeledInput, !editable && styles.labeledInputDisabled]}
@@ -470,46 +586,115 @@ function LabeledInput({ label, value, onChangeText, editable }) {
         keyboardType="number-pad"
         editable={editable}
       />
+      <Text style={styles.unit}>{unit || ""}</Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  center: { flex: 1, alignItems: "center", justifyContent: "center" },
-  container: { padding: 24, backgroundColor: "#fff" },
-  title: { fontSize: 22, fontWeight: "700" },
-  subtitle: { fontSize: 13, color: "#666", marginTop: 4, marginBottom: 12 },
-  alertBox: { backgroundColor: "#fef3c7", borderRadius: 10, padding: 14, marginBottom: 20 },
-  alertText: { color: "#92400e", marginBottom: 10 },
-  section: { marginBottom: 24 },
-  sectionTitle: { fontSize: 13, fontWeight: "700", color: "#374151", textTransform: "uppercase", marginBottom: 8 },
-  memberRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: "#f3f4f6" },
-  memberLabel: { fontSize: 14 },
-  removeText: { color: "#ef4444", fontSize: 13 },
-  addRow: { flexDirection: "row", marginTop: 10, gap: 8 },
-  addInput: { flex: 1, borderWidth: 1, borderColor: "#d1d5db", borderRadius: 8, padding: 10 },
-  addButton: { backgroundColor: "#0f172a", borderRadius: 8, paddingHorizontal: 16, justifyContent: "center", minWidth: 64, alignItems: "center" },
-  addButtonText: { color: "#fff", fontWeight: "600" },
-  buttonDimmed: { opacity: 0.6 },
-  labeledInputRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 },
-  labeledInputLabel: { fontSize: 13, color: "#374151", flex: 1 },
-  labeledInput: { width: 70, borderWidth: 1, borderColor: "#d1d5db", borderRadius: 8, padding: 8, textAlign: "center" },
-  labeledInputDisabled: { backgroundColor: "#f3f4f6", color: "#999" },
-  fileRow: { fontSize: 14, paddingVertical: 4 },
-  hint: { fontSize: 12, color: "#999", marginBottom: 8 },
-  decryptedText: { marginTop: 12, backgroundColor: "#f3f4f6", borderRadius: 8, padding: 12, fontSize: 14 },
-  button: { backgroundColor: "#0f172a", borderRadius: 10, padding: 14, alignItems: "center", marginTop: 8 },
-  buttonText: { color: "#fff", fontSize: 16, fontWeight: "600" },
-  secondaryButton: { borderWidth: 1, borderColor: "#d1d5db", borderRadius: 8, padding: 10, alignItems: "center", marginTop: 8 },
-  secondaryButtonText: { color: "#374151", fontWeight: "600" },
-  dangerButton: { borderWidth: 1, borderColor: "#ef4444", borderRadius: 10, padding: 14, alignItems: "center", marginTop: 12 },
-  dangerButtonText: { color: "#ef4444", fontWeight: "600" },
-  recipientRow: { paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: "#f3f4f6" },
-  shareOk: { fontSize: 12, color: "#16a34a", fontWeight: "600", marginTop: 2 },
-  shareMissing: { fontSize: 12, color: "#9ca3af", marginTop: 2 },
-  fingerprintSmall: { fontSize: 11, color: "#94a3b8", letterSpacing: 0.5, marginTop: 2 },
-  shareInput: { marginTop: 12 },
-  keysError: { backgroundColor: "#fef2f2", borderRadius: 8, padding: 10, marginBottom: 8 },
-  keysErrorText: { color: "#b91c1c", fontSize: 12.5, lineHeight: 18 },
-  keysRetry: { color: "#0f172a", fontWeight: "700", marginTop: 6 },
+  screen: { flex: 1, backgroundColor: colors.canvas },
+  container: { padding: 20, paddingTop: 4, paddingBottom: 32 },
+  flex: { flex: 1 },
+
+  lifeCard: { paddingVertical: 14, paddingHorizontal: 8 },
+  alertText: { color: colors.amberInk, fontSize: 13, lineHeight: 19, marginBottom: 10 },
+
+  section: { padding: 16 },
+  sectionHead: { flexDirection: "row", alignItems: "center", marginBottom: 14 },
+  sectionHeading: { flex: 1, marginLeft: 12 },
+  sectionTitle: { fontSize: 15.5, fontWeight: "800", color: colors.ink },
+  sectionSubtitle: { fontSize: 12, color: colors.muted, marginTop: 1 },
+  sectionCount: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: colors.muted,
+    backgroundColor: colors.hairline,
+    borderRadius: radius.pill,
+    paddingHorizontal: 9,
+    paddingVertical: 3,
+    overflow: "hidden",
+  },
+  hint: { fontSize: 12.5, color: colors.muted, lineHeight: 18, marginBottom: 10 },
+  hintInline: { fontSize: 12.5, color: colors.muted },
+  checking: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 6 },
+
+  addRow: { flexDirection: "row", alignItems: "flex-start", gap: 8, marginTop: 8 },
+  addField: { flex: 1, marginBottom: 0 },
+  addButton: { minHeight: 50, borderRadius: radius.md + 2 },
+
+  decrypted: {
+    marginTop: 12,
+    backgroundColor: colors.greenSoft,
+    borderWidth: 1,
+    borderColor: "#bbf7d0",
+    borderRadius: radius.md,
+    padding: 12,
+  },
+  decryptedHead: { flexDirection: "row", alignItems: "center", gap: 5, marginBottom: 6 },
+  decryptedLabel: { fontSize: 11, fontWeight: "800", color: colors.greenInk, textTransform: "uppercase", letterSpacing: 0.5 },
+  decryptedText: { fontSize: 14, color: colors.ink, lineHeight: 21 },
+
+  memberRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.hairline,
+  },
+  memberBody: { flex: 1, marginHorizontal: 12 },
+  memberName: { fontSize: 14, fontWeight: "700", color: colors.ink },
+  memberEmail: { fontSize: 12, color: colors.faint, marginTop: 1 },
+
+  fingerprintSmall: { fontSize: 11, color: colors.faint, letterSpacing: 0.5, marginTop: 2, fontVariant: ["tabular-nums"] },
+  shareField: { marginTop: 14, marginBottom: 10 },
+  keysErrorText: { color: colors.redInk, fontSize: 12.5, lineHeight: 18 },
+  keysRetry: { color: colors.ink, fontWeight: "800", marginTop: 6 },
+
+  labeledInputRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 9,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.hairline,
+  },
+  lastRow: { borderBottomWidth: 0 },
+  labeledIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: 10,
+    backgroundColor: colors.canvas,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  labeledInputLabel: { fontSize: 14, color: colors.text, flex: 1, marginLeft: 12, fontWeight: "600" },
+  labeledInput: {
+    width: 64,
+    borderWidth: 1.5,
+    borderColor: colors.line,
+    backgroundColor: colors.canvas,
+    borderRadius: radius.sm,
+    paddingVertical: 8,
+    textAlign: "center",
+    fontSize: 15,
+    fontWeight: "800",
+    color: colors.ink,
+  },
+  labeledInputDisabled: { backgroundColor: colors.hairline, borderColor: colors.hairline, color: colors.muted },
+  unit: { fontSize: 12, color: colors.faint, marginLeft: 8, width: 30 },
+  saveButton: { marginTop: 12 },
+
+  fileRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingVertical: 9,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.hairline,
+  },
+  fileName: { flex: 1, fontSize: 14, color: colors.ink, fontWeight: "600" },
+
+  dangerCard: { marginTop: 8 },
+  dangerHead: { flexDirection: "row", alignItems: "center", gap: 6 },
+  dangerTitle: { fontSize: 14, fontWeight: "800", color: colors.redInk },
+  dangerText: { fontSize: 12.5, color: colors.muted, lineHeight: 18, marginTop: 4, marginBottom: 12 },
 });

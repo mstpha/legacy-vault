@@ -1,7 +1,7 @@
 const express = require("express");
 const controller = require("../controllers/auth.controller");
 const { requireAuth } = require("../middleware/requireAuth");
-const { authLimiter } = require("../middleware/rateLimiter");
+const { authLimiter, refreshLimiter } = require("../middleware/rateLimiter");
 const {
   registerSchema,
   loginSchema,
@@ -14,7 +14,7 @@ const router = express.Router();
 
 router.post("/register", authLimiter, validate(registerSchema), controller.register);
 router.post("/login", authLimiter, validate(loginSchema), controller.login);
-router.post("/refresh", authLimiter, validate(refreshSchema), controller.refresh);
+router.post("/refresh", refreshLimiter, validate(refreshSchema), controller.refresh);
 router.post("/logout", requireAuth, validate(refreshSchema), controller.logout);
 router.post("/verify-email", authLimiter, controller.verifyEmail);
 

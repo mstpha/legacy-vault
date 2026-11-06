@@ -1,17 +1,11 @@
 import React, { useCallback, useState } from "react";
 import { View, Text, FlatList, Pressable, StyleSheet, RefreshControl, Alert } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { listCapsulesRequest } from "../api/capsule.api";
-
-const STATE_LABELS = {
-  DRAFT: "Draft",
-  ACTIVE: "Active",
-  INACTIVITY_ALERT: "Inactivity alert",
-  PENDING_VALIDATION: "Pending validation",
-  UNLOCKED: "Unlocked",
-  REVOKED: "Revoked",
-  ARCHIVED: "Opened",
-};
+import { PageHeader, Segmented, IconBadge, StatePill, Pill, Banner, EmptyState, Button } from "../components/ui";
+import { colors, radius, shadow, STATE_COLORS, TYPE_ICONS } from "../theme";
 
 // A small call-to-action tag so the user can see at a glance where they're needed.
 function actionTag(role, state) {
@@ -21,9 +15,37 @@ function actionTag(role, state) {
   return null;
 }
 
-export default function CapsuleListScreen({ navigation }) {
+const TABS = {
+  testator: {
+    label: "Mine",
+    listKey: "asTestator",
+    icon: "archive",
+    emptyTitle: "No capsules yet",
+    empty: "Create your first capsule to store a document, a message or credentials for the people you trust.",
+  },
+  guarantor: {
+    label: "Guarantor",
+    listKey: "asGuarantor",
+    icon: "shield-checkmark",
+    emptyTitle: "Not a guarantor yet",
+    empty: "When someone names you as a guarantor, their capsule appears here.",
+  },
+  beneficiary: {
+    label: "Beneficiary",
+    listKey: "asBeneficiary",
+    icon: "gift",
+    emptyTitle: "Nothing left to you yet",
+    empty: "Capsules where you're a beneficiary appear here, readable once unlocked.",
+  },
+};
+
+const titleCase = (s) => s.charAt(0) + s.slice(1).toLowerCase();
+
+export default function CapsuleListScreen({ navigation, route }) {
+  const insets = useSafeAreaInsets();
   const [capsules, setCapsules] = useState({ asTestator: [], asGuarantor: [], asBeneficiary: [] });
   const [refreshing, setRefreshing] = useState(false);
+  const [tab, setTab] = useState(route.params?.tab || "testator");
 
   const load = useCallback(async () => {
     try {
@@ -46,12 +68,6 @@ export default function CapsuleListScreen({ navigation }) {
     setRefreshing(false);
   };
 
-  const sections = [
-    { title: "My capsules (I'm the testator)", data: capsules.asTestator, role: "testator" },
-    { title: "Where I'm a guarantor", data: capsules.asGuarantor, role: "guarantor" },
-    { title: "Where I'm a beneficiary", data: capsules.asBeneficiary, role: "beneficiary" },
-  ];
-
   const onPressItem = (item, role) => {
     if (role === "testator") {
       navigation.navigate("CapsuleDetail", { capsuleId: item.id });
@@ -60,65 +76,143 @@ export default function CapsuleListScreen({ navigation }) {
     }
   };
 
+  const options = Object.entries(TABS).map(([key, t]) => {
+    const list = capsules[t.listKey] || [];
+    return { key, label: t.label, count: list.length, alert: list.some((c) => actionTag(key, c.state)) };
+  });
+
+  const current = TABS[tab];
+  const blocked = tab === "guarantor" ? capsules.blocked?.guarantor : null;
+  // Capsules that need the user come first.
+  const data = blocked
+    ? []
+    : [...(capsules[current.listKey] || [])].sort((a, b) => Number(!!actionTag(tab, b.state)) - Number(!!actionTag(tab, a.state)));
+
   return (
-    <FlatList
-      contentContainerStyle={styles.container}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-      data={sections}
-      keyExtractor={(s) => s.role}
-      renderItem={({ item: section }) => (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>{section.title}</Text>
-          {section.role === "guarantor" && capsules.blocked?.guarantor ? (
-            <Text style={styles.blocked}>🔒 {capsules.blocked.guarantor}</Text>
-          ) : section.data.length === 0 ? (
-            <Text style={styles.empty}>Nothing here yet.</Text>
+    <View style={styles.screen}>
+      <FlatList
+        contentContainerStyle={[styles.container, { paddingBottom: insets.bottom + 100 }]}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        data={data}
+        keyExtractor={(c) => c.id}
+        ListHeaderComponent={
+          <>
+            <PageHeader title="Capsules" subtitle="Everything you've created or been entrusted with." />
+            <Segmented options={options} value={tab} onChange={setTab} />
+          </>
+        }
+        ListEmptyComponent={
+          blocked ? (
+            <Banner tone="danger" icon="lock-closed">
+              {blocked}
+            </Banner>
           ) : (
-            section.data.map((item) => {
-              const tag = actionTag(section.role, item.state);
-              return (
-                <Pressable key={item.id} style={styles.card} onPress={() => onPressItem(item, section.role)}>
-                  <View style={styles.cardTop}>
-                    <Text style={styles.cardTitle} numberOfLines={1}>
-                      {item.title}
-                    </Text>
-                    {tag && (
-                      <View style={styles.tag}>
-                        <Text style={styles.tagText}>{tag}</Text>
-                      </View>
-                    )}
-                  </View>
-                  <Text style={styles.cardSubtitle}>
-                    {item.type} · {STATE_LABELS[item.state] || item.state}
-                    {section.role !== "testator" && item.testator?.fullName ? ` · by ${item.testator.fullName}` : ""}
-                  </Text>
-                </Pressable>
-              );
-            })
-          )}
-        </View>
-      )}
-      ListFooterComponent={
-        <Pressable style={styles.fab} onPress={() => navigation.navigate("CapsuleCreate")}>
-          <Text style={styles.fabText}>+ New capsule</Text>
-        </Pressable>
-      }
-    />
+            <View style={styles.emptyCard}>
+              <EmptyState
+                icon={current.icon}
+                title={current.emptyTitle}
+                text={current.empty}
+                action={
+                  tab === "testator" ? (
+                    <Button
+                      title="Create a capsule"
+                      icon="add"
+                      compact
+                      onPress={() => navigation.navigate("CapsuleCreate")}
+                      style={styles.emptyButton}
+                    />
+                  ) : null
+                }
+              />
+            </View>
+          )
+        }
+        renderItem={({ item }) => {
+          const tag = actionTag(tab, item.state);
+          const stateColor = STATE_COLORS[item.state] || colors.muted;
+          return (
+            <Pressable
+              style={({ pressed }) => [styles.card, tag && styles.cardAction, pressed && styles.pressed]}
+              onPress={() => onPressItem(item, tab)}
+            >
+              <View style={[styles.stripe, { backgroundColor: stateColor }]} />
+              <IconBadge name={TYPE_ICONS[item.type] || "archive"} color={stateColor} soft size={44} iconSize={21} />
+              <View style={styles.cardBody}>
+                <Text style={styles.cardTitle} numberOfLines={1}>
+                  {item.title}
+                </Text>
+                <Text style={styles.cardSubtitle} numberOfLines={1}>
+                  {titleCase(item.type)}
+                  {tab !== "testator" && item.testator?.fullName ? ` · from ${item.testator.fullName}` : ""}
+                </Text>
+                <View style={styles.pillRow}>
+                  <StatePill state={item.state} />
+                  {tag && <Pill label={tag} color={colors.indigo} soft={false} icon="alert-circle" />}
+                </View>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={colors.ghost} />
+            </Pressable>
+          );
+        }}
+      />
+
+      <Pressable
+        style={({ pressed }) => [styles.fab, { bottom: insets.bottom + 20 }, pressed && styles.pressed]}
+        onPress={() => navigation.navigate("CapsuleCreate")}
+      >
+        <Ionicons name="add" size={22} color="#fff" />
+        <Text style={styles.fabText}>New capsule</Text>
+      </Pressable>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 20, paddingBottom: 48 },
-  section: { marginBottom: 24 },
-  sectionTitle: { fontSize: 14, fontWeight: "700", color: "#666", marginBottom: 8, textTransform: "uppercase" },
-  empty: { color: "#999", fontSize: 13, fontStyle: "italic" },
-  blocked: { color: "#b91c1c", backgroundColor: "#fef2f2", borderRadius: 10, padding: 12, fontSize: 13, lineHeight: 19 },
-  card: { backgroundColor: "#f3f4f6", borderRadius: 10, padding: 14, marginBottom: 8 },
-  cardTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  cardTitle: { flex: 1, fontSize: 16, fontWeight: "600", marginRight: 8 },
-  cardSubtitle: { fontSize: 13, color: "#666", marginTop: 2 },
-  tag: { backgroundColor: "#6366f1", borderRadius: 999, paddingVertical: 3, paddingHorizontal: 10 },
-  tagText: { color: "#fff", fontSize: 11, fontWeight: "700" },
-  fab: { backgroundColor: "#0f172a", borderRadius: 10, padding: 16, alignItems: "center", marginTop: 8 },
-  fabText: { color: "#fff", fontSize: 16, fontWeight: "600" },
+  screen: { flex: 1, backgroundColor: colors.canvas },
+  container: { padding: 20, paddingTop: 4 },
+  pressed: { opacity: 0.85, transform: [{ scale: 0.985 }] },
+
+  emptyCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderWidth: 1.5,
+    borderColor: colors.line,
+    borderStyle: "dashed",
+  },
+  emptyButton: { marginTop: 16 },
+
+  card: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    padding: 14,
+    paddingLeft: 18,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: colors.hairline,
+    overflow: "hidden",
+    ...shadow.card,
+  },
+  cardAction: { borderColor: colors.indigoLine, backgroundColor: "#fbfbff" },
+  stripe: { position: "absolute", left: 0, top: 0, bottom: 0, width: 4 },
+  cardBody: { flex: 1, marginLeft: 14, marginRight: 8 },
+  cardTitle: { fontSize: 15.5, fontWeight: "800", color: colors.ink },
+  cardSubtitle: { fontSize: 12.5, color: colors.muted, marginTop: 2 },
+  pillRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 9 },
+
+  fab: {
+    position: "absolute",
+    right: 20,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: colors.ink,
+    borderRadius: radius.pill,
+    paddingVertical: 14,
+    paddingLeft: 16,
+    paddingRight: 20,
+    ...shadow.hero,
+  },
+  fabText: { color: "#fff", fontSize: 15, fontWeight: "800" },
 });

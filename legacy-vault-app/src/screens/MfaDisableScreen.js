@@ -1,7 +1,15 @@
 import React, { useState } from "react";
-import { View, Text, TextInput, Pressable, StyleSheet, Alert, ActivityIndicator } from "react-native";
+import { View, Text, StyleSheet, Alert, ScrollView } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../context/AuthContext";
 import { mfaDisableRequest } from "../api/auth.api";
+import { Card, CodeField, Button, IconBadge } from "../components/ui";
+import { colors, radius } from "../theme";
+
+const LOSES = [
+  "A stolen password is enough to sign in",
+  "Your capsules lose an extra layer of protection",
+];
 
 export default function MfaDisableScreen({ navigation }) {
   const { refreshMe, applyAccessToken } = useAuth();
@@ -27,56 +35,50 @@ export default function MfaDisableScreen({ navigation }) {
   };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Disable two-factor authentication</Text>
-      <Text style={styles.subtitle}>
-        Enter the current 6-digit code from your authenticator app to confirm you want to turn this off.
-      </Text>
+    <ScrollView style={styles.screen} contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+      <View style={styles.statusCard}>
+        <IconBadge name="shield-checkmark" color={colors.green} size={56} iconSize={28} />
+        <Text style={styles.statusTitle}>Two-factor is on</Text>
+        <Text style={styles.statusText}>Your account is protected by an authenticator code.</Text>
+      </View>
 
-      <TextInput
-        style={styles.input}
-        placeholder="123456"
-        keyboardType="number-pad"
-        maxLength={6}
-        value={code}
-        onChangeText={setCode}
-      />
+      <Text style={styles.heading}>Turning it off means</Text>
+      <View style={styles.loses}>
+        {LOSES.map((line) => (
+          <View key={line} style={styles.loseRow}>
+            <Ionicons name="close-circle" size={18} color={colors.red} />
+            <Text style={styles.loseText}>{line}</Text>
+          </View>
+        ))}
+      </View>
 
-      {submitting ? (
-        <ActivityIndicator style={styles.button} />
-      ) : (
-        <Pressable
-          style={[styles.button, code.length !== 6 && styles.buttonDisabled]}
-          onPress={onSubmit}
-          disabled={code.length !== 6}
-        >
-          <Text style={styles.buttonText}>Confirm and disable</Text>
-        </Pressable>
-      )}
-
-      <Text style={styles.link} onPress={() => navigation.goBack()}>
-        Cancel
-      </Text>
-    </View>
+      <Card>
+        <Text style={styles.label}>Enter your current 6-digit code to confirm</Text>
+        <CodeField value={code} onChangeText={setCode} />
+        <Button title="Turn off two-factor" variant="dangerSolid" onPress={onSubmit} disabled={code.length !== 6} loading={submitting} />
+        <Button title="Keep it on" variant="ghost" onPress={() => navigation.goBack()} style={styles.cancel} />
+      </Card>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: "center", padding: 24, backgroundColor: "#fff" },
-  title: { fontSize: 20, fontWeight: "700", textAlign: "center" },
-  subtitle: { fontSize: 14, color: "#666", textAlign: "center", marginTop: 8, marginBottom: 28 },
-  input: {
+  screen: { flex: 1, backgroundColor: colors.canvas },
+  container: { padding: 20, paddingTop: 8, paddingBottom: 48 },
+  statusCard: {
+    alignItems: "center",
+    backgroundColor: colors.greenSoft,
     borderWidth: 1,
-    borderColor: "#d1d5db",
-    borderRadius: 10,
-    padding: 14,
-    marginBottom: 12,
-    fontSize: 20,
-    textAlign: "center",
-    letterSpacing: 6,
+    borderColor: "#bbf7d0",
+    borderRadius: radius.xl,
+    padding: 22,
   },
-  button: { backgroundColor: "#ef4444", borderRadius: 10, padding: 14, alignItems: "center", marginTop: 8 },
-  buttonDisabled: { opacity: 0.5 },
-  buttonText: { color: "#fff", fontSize: 16, fontWeight: "600" },
-  link: { marginTop: 20, color: "#2563eb", textAlign: "center", fontSize: 14 },
+  statusTitle: { fontSize: 19, fontWeight: "800", color: colors.ink, marginTop: 12 },
+  statusText: { fontSize: 13.5, color: colors.greenInk, marginTop: 4, textAlign: "center" },
+  heading: { fontSize: 15, fontWeight: "800", color: colors.ink, marginTop: 22, marginBottom: 10 },
+  loses: { gap: 10, marginBottom: 18 },
+  loseRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  loseText: { flex: 1, fontSize: 13.5, color: colors.body },
+  label: { fontSize: 13, fontWeight: "700", color: colors.text, marginBottom: 12, textAlign: "center" },
+  cancel: { marginTop: 4 },
 });

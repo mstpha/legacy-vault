@@ -12,17 +12,28 @@ const permissionsRoutes = require("./routes/permissions.routes");
 const notificationRoutes = require("./routes/notification.routes");
 const auditRoutes = require("./routes/audit.routes");
 const keysRoutes = require("./routes/keys.routes");
+const healthRoutes = require("./routes/health.routes");
+const { idempotency } = require("./middleware/idempotency");
 
 const app = express();
 const { requestHandler: sentryRequestHandler, errorHandler: sentryErrorHandler } = initSentry(app);
 
+// Behind a reverse proxy / PaaS (Render, Railway, Fly, nginx...) req.ip is the proxy's address unless
+// this is set, which makes every user share ONE rate-limit bucket. Set TRUST_PROXY=1 in production.
+if (process.env.TRUST_PROXY) {
+  const v = process.env.TRUST_PROXY;
+  app.set("trust proxy", /^\d+$/.test(v) ? Number(v) : v === "true" ? true : v);
+}
+
 app.use(sentryRequestHandler);
 app.use(helmet());
-app.use(cors());
+app.use(cors(require("./config/cors")));
 // Capsule routes carry encrypted file uploads (base64 JSON), so they get a bigger body limit.
 // This must come BEFORE the global parser, because the first parser to run wins.
 app.use("/api/capsules", express.json({ limit: "10mb" }));
 app.use(express.json({ limit: "100kb" }));
+// HA: replays the stored response when a write is retried with the same Idempotency-Key.
+app.use("/api", idempotency);
 
 // Structured request logging (method, path, status, duration) for every call.
 app.use((req, res, next) => {
@@ -38,10 +49,11 @@ app.use((req, res, next) => {
   next();
 });
 
-// Supervision endpoint (uptime checks / local dev).
-app.get("/health", (req, res) => {
-  res.status(200).json({ status: "ok", uptime: process.uptime() });
-});
+// Supervision endpoints (uptime monitors, load balancers):
+//   GET /health        HA routing probe - 503 when Supabase A is unreachable (the app then fails over)
+//   GET /health/live   liveness  - process is up (no dependencies, always cheap)
+//   GET /health/ready  readiness - database, Redis and the inactivity sweep
+app.use("/health", healthRoutes);
 
 app.use("/api/auth", authRoutes);
 app.use("/api/capsules", capsuleRoutes);

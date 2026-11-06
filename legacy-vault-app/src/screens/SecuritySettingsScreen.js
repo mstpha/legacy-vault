@@ -1,11 +1,13 @@
 import React, { useCallback, useState } from "react";
-import { View, Text, Pressable, Switch, StyleSheet, Alert, ActivityIndicator, ScrollView } from "react-native";
+import { View, Text, Switch, StyleSheet, Alert, ScrollView } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import { useAuth } from "../context/AuthContext";
 import { authenticate, getAuthCapability, isLockEnabled, setLockEnabled, LOCK_GRACE_MS } from "../utils/biometricLock";
 import { createDeviceKey, deleteDeviceKey, getDeviceKeyInfo } from "../utils/deviceKeys";
 import { getMyKeyRequest, registerPublicKeyRequest, removeMyKeyRequest } from "../api/keys.api";
+import { Banner, Button, Card, Hero, HeroPill, HeroPills, IconBadge, Loading, SectionLabel } from "../components/ui";
+import { colors, radius } from "../theme";
 
 const MODE_TEXT = {
   hw: "Locked to this phone's secure hardware and your biometrics.",
@@ -41,16 +43,11 @@ export default function SecuritySettingsScreen() {
     }, [load])
   );
 
-  if (!capability) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" />
-      </View>
-    );
-  }
+  if (!capability) return <Loading />;
 
   const canLock = capability.kind !== "none";
   const synced = key.exists && serverKey === key.publicKey;
+  const protections = Number(lockOn) + Number(key.exists);
 
   const lockDescription =
     capability.kind === "biometric"
@@ -144,31 +141,61 @@ export default function SecuritySettingsScreen() {
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
+      <Hero
+        icon={protections === 2 ? "shield-checkmark" : "finger-print"}
+        eyebrow="This phone"
+        title="Device security"
+        subtitle={
+          protections === 2
+            ? "This phone is fully protected: the app is locked and your device key is ready."
+            : "Lock the app with your biometrics and create a device key to open shared capsules without a passphrase."
+        }
+      >
+        <HeroPills>
+          <HeroPill label={`App lock ${lockOn ? "on" : "off"}`} dot={lockOn ? colors.green : colors.amber} />
+          <HeroPill label={`Device key ${key.exists ? (synced ? "active" : "not synced") : "not set up"}`} dot={key.exists && synced ? colors.green : colors.amber} />
+        </HeroPills>
+      </Hero>
+
       {/* ---------- App lock ---------- */}
-      <Text style={styles.sectionLabel}>App lock</Text>
-      <View style={styles.card}>
+      <SectionLabel>App lock</SectionLabel>
+      <Card>
         <View style={styles.row}>
+          <IconBadge name="finger-print" color={lockOn ? colors.green : colors.teal} size={44} iconSize={22} />
           <View style={styles.rowText}>
             <Text style={styles.cardTitle}>Lock with {capability.kind === "biometric" ? capability.label.toLowerCase() : "phone PIN"}</Text>
-            <Text style={styles.cardBody}>
-              Asks to unlock when you open the app and after {Math.round(LOCK_GRACE_MS / 1000)} seconds away, and hides the screen in the app switcher.
-            </Text>
+            <Text style={styles.status}>{lockOn ? "On" : "Off"}</Text>
           </View>
-          <Switch value={lockOn} onValueChange={onToggleLock} disabled={!canLock || busy} />
+          <Switch
+            value={lockOn}
+            onValueChange={onToggleLock}
+            disabled={!canLock || busy}
+            trackColor={{ false: colors.line, true: colors.green }}
+            thumbColor="#fff"
+          />
         </View>
-        <View style={[styles.note, !canLock && styles.noteWarn]}>
-          <Ionicons name={canLock ? "information-circle" : "warning"} size={16} color={canLock ? "#475569" : "#b45309"} />
-          <Text style={[styles.noteText, !canLock && styles.noteTextWarn]}>{lockDescription}</Text>
-        </View>
-        <Text style={styles.fine}>
-          Your fingerprint or face never leaves your phone. The app only learns "yes" or "no" from the phone.
+        <Text style={styles.cardBody}>
+          Asks to unlock when you open the app and after {Math.round(LOCK_GRACE_MS / 1000)} seconds away, and hides the screen in the app switcher.
         </Text>
-      </View>
+        <Banner tone={canLock ? "info" : "warning"} style={styles.note}>
+          {lockDescription}
+        </Banner>
+        <View style={styles.fineRow}>
+          <Ionicons name="lock-closed" size={12} color={colors.faint} />
+          <Text style={styles.fine}>Your fingerprint or face never leaves your phone. The app only learns "yes" or "no".</Text>
+        </View>
+      </Card>
 
       {/* ---------- Device key ---------- */}
-      <Text style={styles.sectionLabel}>Device key</Text>
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>{key.exists ? "Device key active" : "No device key yet"}</Text>
+      <SectionLabel>Device key</SectionLabel>
+      <Card>
+        <View style={styles.row}>
+          <IconBadge name="key" color={key.exists ? colors.green : colors.amber} size={44} iconSize={21} />
+          <View style={styles.rowText}>
+            <Text style={styles.cardTitle}>{key.exists ? "Device key active" : "No device key yet"}</Text>
+            <Text style={styles.status}>{key.exists ? (synced ? "Registered with the server" : "Not registered yet") : "Optional"}</Text>
+          </View>
+        </View>
         <Text style={styles.cardBody}>
           A key pair made on this phone. Capsule owners can lock a capsule's passphrase to your public key, so you open it with your
           fingerprint instead of typing a passphrase. The private key never leaves this phone.
@@ -177,80 +204,86 @@ export default function SecuritySettingsScreen() {
         {key.exists && (
           <>
             <View style={styles.fingerprintBox}>
-              <Text style={styles.fingerprintLabel}>Your key fingerprint</Text>
-              <Text style={styles.fingerprint}>{key.fingerprint}</Text>
+              <View style={styles.fingerprintHead}>
+                <Ionicons name="finger-print" size={14} color={colors.indigo} />
+                <Text style={styles.fingerprintLabel}>Your key fingerprint</Text>
+              </View>
+              <Text selectable style={styles.fingerprint}>
+                {key.fingerprint}
+              </Text>
               <Text style={styles.fine}>Owners should check this matches what they see before sharing a capsule with you.</Text>
             </View>
             <Text style={styles.cardBody}>{MODE_TEXT[key.mode] || MODE_TEXT.none}</Text>
             {!synced && serverKey !== undefined && (
-              <View style={[styles.note, styles.noteWarn]}>
-                <Ionicons name="warning" size={16} color="#b45309" />
-                <Text style={[styles.noteText, styles.noteTextWarn]}>
-                  The server doesn't have this phone's key, so owners can't share with you yet.
-                </Text>
-              </View>
+              <Banner tone="warning" style={styles.note}>
+                The server doesn't have this phone's key, so owners can't share with you yet.
+              </Banner>
             )}
           </>
         )}
 
         <View style={styles.buttons}>
           {!key.exists ? (
-            <Pressable style={[styles.primary, busy && styles.dim]} onPress={onCreateKey} disabled={busy}>
-              {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>Create device key</Text>}
-            </Pressable>
+            <Button title="Create device key" icon="key" onPress={onCreateKey} loading={busy} />
           ) : (
             <>
               {!synced && serverKey !== undefined && (
-                <Pressable style={[styles.primary, busy && styles.dim]} onPress={onResync} disabled={busy}>
-                  <Text style={styles.primaryText}>Register this key with the server</Text>
-                </Pressable>
+                <Button title="Register this key with the server" icon="cloud-upload" onPress={onResync} disabled={busy} />
               )}
-              <Pressable style={[styles.secondary, busy && styles.dim]} onPress={confirmReplace} disabled={busy}>
-                <Text style={styles.secondaryText}>Replace key</Text>
-              </Pressable>
-              <Pressable style={[styles.danger, busy && styles.dim]} onPress={onRemoveKey} disabled={busy}>
-                <Text style={styles.dangerText}>Remove key</Text>
-              </Pressable>
+              <View style={styles.buttonRow}>
+                <Button title="Replace key" icon="swap-horizontal" variant="secondary" compact onPress={confirmReplace} disabled={busy} style={styles.flex} />
+                <Button title="Remove key" icon="trash-outline" variant="danger" compact onPress={onRemoveKey} disabled={busy} style={styles.flex} />
+              </View>
             </>
           )}
         </View>
         {!canLock && (
           <Text style={styles.fine}>Without a phone screen lock the key can still be created, but nothing will ask before it is used.</Text>
         )}
-      </View>
+      </Card>
 
-      <Text style={styles.footer}>
-        Keep your capsule passphrase safe even if you use device keys: if you lose this phone, the passphrase is the way back in.
-      </Text>
+      <View style={styles.footer}>
+        <Ionicons name="information-circle-outline" size={16} color={colors.faint} />
+        <Text style={styles.footerText}>
+          Keep your capsule passphrase safe even if you use device keys: if you lose this phone, the passphrase is the way back in.
+        </Text>
+      </View>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: "#f8fafc" },
-  center: { flex: 1, alignItems: "center", justifyContent: "center" },
-  container: { padding: 20, paddingBottom: 48 },
-  sectionLabel: { fontSize: 12, fontWeight: "700", color: "#94a3b8", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 10, marginTop: 8 },
-  card: { backgroundColor: "#fff", borderRadius: 14, padding: 16, marginBottom: 18, borderWidth: 1, borderColor: "#f1f5f9" },
+  screen: { flex: 1, backgroundColor: colors.canvas },
+  container: { padding: 20, paddingTop: 4, paddingBottom: 48 },
+  flex: { flex: 1 },
   row: { flexDirection: "row", alignItems: "center" },
-  rowText: { flex: 1, marginRight: 12 },
-  cardTitle: { fontSize: 15, fontWeight: "700", color: "#0f172a" },
-  cardBody: { fontSize: 13, color: "#64748b", lineHeight: 19, marginTop: 4 },
-  note: { flexDirection: "row", gap: 8, backgroundColor: "#f1f5f9", borderRadius: 10, padding: 10, marginTop: 12 },
-  noteWarn: { backgroundColor: "#fffbeb" },
-  noteText: { flex: 1, fontSize: 12.5, color: "#475569", lineHeight: 18 },
-  noteTextWarn: { color: "#92400e" },
-  fine: { fontSize: 11.5, color: "#94a3b8", lineHeight: 17, marginTop: 10 },
-  fingerprintBox: { backgroundColor: "#f8fafc", borderRadius: 10, padding: 12, marginTop: 12, marginBottom: 8 },
-  fingerprintLabel: { fontSize: 11, fontWeight: "700", color: "#64748b", textTransform: "uppercase" },
-  fingerprint: { fontSize: 17, fontWeight: "700", color: "#0f172a", letterSpacing: 1, marginTop: 4, fontVariant: ["tabular-nums"] },
-  buttons: { marginTop: 14, gap: 8 },
-  primary: { backgroundColor: "#0f172a", borderRadius: 10, padding: 13, alignItems: "center" },
-  primaryText: { color: "#fff", fontSize: 14, fontWeight: "600" },
-  secondary: { borderWidth: 1, borderColor: "#d1d5db", borderRadius: 10, padding: 12, alignItems: "center" },
-  secondaryText: { color: "#374151", fontSize: 14, fontWeight: "600" },
-  danger: { borderWidth: 1, borderColor: "#fecaca", borderRadius: 10, padding: 12, alignItems: "center" },
-  dangerText: { color: "#ef4444", fontSize: 14, fontWeight: "600" },
-  dim: { opacity: 0.6 },
-  footer: { fontSize: 12, color: "#94a3b8", lineHeight: 18, textAlign: "center", marginTop: 4 },
+  rowText: { flex: 1, marginHorizontal: 12 },
+  cardTitle: { fontSize: 15.5, fontWeight: "800", color: colors.ink },
+  status: { fontSize: 12.5, color: colors.muted, marginTop: 2, fontWeight: "600" },
+  cardBody: { fontSize: 13, color: colors.muted, lineHeight: 19, marginTop: 12 },
+  note: { marginTop: 12, marginBottom: 0 },
+  fineRow: { flexDirection: "row", gap: 6, marginTop: 12, alignItems: "flex-start" },
+  fine: { flex: 1, fontSize: 11.5, color: colors.faint, lineHeight: 17, marginTop: 4 },
+  fingerprintBox: {
+    backgroundColor: colors.indigoSoft,
+    borderWidth: 1,
+    borderColor: colors.indigoLine,
+    borderRadius: radius.md + 2,
+    padding: 14,
+    marginTop: 14,
+  },
+  fingerprintHead: { flexDirection: "row", alignItems: "center", gap: 6 },
+  fingerprintLabel: { fontSize: 11, fontWeight: "800", color: colors.indigoInk, textTransform: "uppercase", letterSpacing: 0.6 },
+  fingerprint: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: colors.ink,
+    letterSpacing: 1.5,
+    marginTop: 8,
+    fontVariant: ["tabular-nums"],
+  },
+  buttons: { marginTop: 16, gap: 10 },
+  buttonRow: { flexDirection: "row", gap: 10 },
+  footer: { flexDirection: "row", gap: 8, paddingHorizontal: 4, marginTop: 4 },
+  footerText: { flex: 1, fontSize: 12, color: colors.faint, lineHeight: 18 },
 });

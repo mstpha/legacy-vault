@@ -1,5 +1,5 @@
 import React, { useCallback, useLayoutEffect, useState } from "react";
-import { View, Text, FlatList, Pressable, StyleSheet, RefreshControl, ActivityIndicator, Alert } from "react-native";
+import { View, Text, SectionList, Pressable, StyleSheet, RefreshControl, Alert } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import {
@@ -8,6 +8,8 @@ import {
   markAllNotificationsReadRequest,
 } from "../api/notification.api";
 import { checkBlockedPermission } from "../api/permissionCheck.api";
+import { EmptyState, Loading } from "../components/ui";
+import { colors, radius, shadow } from "../theme";
 
 const TONES = {
   info: { bg: "#eff6ff", fg: "#3b82f6" },
@@ -87,8 +89,14 @@ export default function NotificationsScreen({ navigation }) {
   useLayoutEffect(() => {
     navigation.setOptions({
       headerRight: () => (
-        <Pressable onPress={onMarkAll} disabled={unreadCount === 0} hitSlop={10}>
-          <Text style={[styles.headerAction, unreadCount === 0 && styles.headerActionDisabled]}>Mark all read</Text>
+        <Pressable
+          onPress={onMarkAll}
+          disabled={unreadCount === 0}
+          hitSlop={10}
+          style={[styles.headerAction, unreadCount === 0 && styles.headerActionDisabled]}
+        >
+          <Ionicons name="checkmark-done" size={15} color={unreadCount === 0 ? colors.ghost : colors.indigo} />
+          <Text style={[styles.headerActionText, unreadCount === 0 && styles.headerActionTextDisabled]}>Read all</Text>
         </Pressable>
       ),
     });
@@ -114,32 +122,42 @@ export default function NotificationsScreen({ navigation }) {
     navigation.navigate("SharedCapsule", { capsuleId: item.capsuleId });
   };
 
-  if (loading) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" />
-      </View>
-    );
-  }
+  if (loading) return <Loading />;
+
+  const sections = [
+    { title: "New", data: items.filter((n) => !n.read) },
+    { title: "Earlier", data: items.filter((n) => n.read) },
+  ].filter((s) => s.data.length > 0);
 
   return (
-    <FlatList
+    <SectionList
       style={styles.screen}
       contentContainerStyle={items.length === 0 ? styles.emptyContainer : styles.container}
-      data={items}
+      sections={sections}
       keyExtractor={(n) => n.id}
+      stickySectionHeadersEnabled={false}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       ListEmptyComponent={
-        <View style={styles.empty}>
-          <Ionicons name={failed ? "cloud-offline-outline" : "notifications-off-outline"} size={44} color="#cbd5e1" />
-          <Text style={styles.emptyTitle}>{failed ? "Couldn't load notifications" : "You're all caught up"}</Text>
-          <Text style={styles.emptyText}>
-            {failed
+        <EmptyState
+          icon={failed ? "cloud-offline-outline" : "notifications-off-outline"}
+          title={failed ? "Couldn't load notifications" : "You're all caught up"}
+          text={
+            failed
               ? "Pull down to try again."
-              : "Alerts about your capsules, guarantor requests and unlocks will show up here."}
-          </Text>
-        </View>
+              : "Alerts about your capsules, guarantor requests and unlocks will show up here."
+          }
+        />
       }
+      renderSectionHeader={({ section }) => (
+        <View style={styles.sectionHead}>
+          <Text style={styles.sectionLabel}>{section.title}</Text>
+          {section.title === "New" && (
+            <View style={styles.newCount}>
+              <Text style={styles.newCountText}>{section.data.length}</Text>
+            </View>
+          )}
+        </View>
+      )}
       renderItem={({ item }) => {
         const tone = TONES[item.tone] || TONES.info;
         return (
@@ -155,11 +173,17 @@ export default function NotificationsScreen({ navigation }) {
                 <Text style={[styles.title, !item.read && styles.titleUnread]} numberOfLines={1}>
                   {item.title}
                 </Text>
-                {!item.read && <View style={styles.dot} />}
+                <Text style={styles.time}>{timeAgo(item.createdAt)}</Text>
               </View>
               <Text style={styles.message}>{item.message}</Text>
-              <Text style={styles.time}>{timeAgo(item.createdAt)}</Text>
+              {item.capsuleId && (
+                <View style={styles.openRow}>
+                  <Text style={[styles.openText, { color: tone.fg }]}>View capsule</Text>
+                  <Ionicons name="arrow-forward" size={12} color={tone.fg} />
+                </View>
+              )}
             </View>
+            {!item.read && <View style={styles.dot} />}
           </Pressable>
         );
       }}
@@ -168,32 +192,48 @@ export default function NotificationsScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: "#f8fafc" },
-  center: { flex: 1, alignItems: "center", justifyContent: "center" },
-  container: { padding: 16, paddingBottom: 40 },
+  screen: { flex: 1, backgroundColor: colors.canvas },
+  container: { padding: 20, paddingTop: 4, paddingBottom: 40 },
   emptyContainer: { flexGrow: 1, justifyContent: "center" },
-  empty: { alignItems: "center", paddingHorizontal: 40 },
-  emptyTitle: { fontSize: 17, fontWeight: "700", color: "#0f172a", marginTop: 14 },
-  emptyText: { fontSize: 13, color: "#64748b", textAlign: "center", marginTop: 6, lineHeight: 19 },
-  headerAction: { color: "#0f172a", fontSize: 14, fontWeight: "600" },
-  headerActionDisabled: { color: "#cbd5e1" },
+
+  headerAction: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: colors.indigoSoft,
+    borderRadius: radius.pill,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+  },
+  headerActionDisabled: { backgroundColor: colors.hairline },
+  headerActionText: { color: colors.indigo, fontSize: 13, fontWeight: "800" },
+  headerActionTextDisabled: { color: colors.ghost },
+
+  sectionHead: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 14, marginBottom: 10 },
+  sectionLabel: { fontSize: 12, fontWeight: "800", color: colors.faint, textTransform: "uppercase", letterSpacing: 0.8 },
+  newCount: { backgroundColor: colors.indigo, borderRadius: radius.pill, paddingHorizontal: 7, paddingVertical: 1 },
+  newCountText: { color: "#fff", fontSize: 11, fontWeight: "800" },
+
   card: {
     flexDirection: "row",
-    backgroundColor: "#fff",
-    borderRadius: 14,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
     padding: 14,
     marginBottom: 10,
     borderWidth: 1,
-    borderColor: "#f1f5f9",
+    borderColor: colors.hairline,
+    ...shadow.card,
   },
-  cardUnread: { borderColor: "#c7d2fe", backgroundColor: "#fcfcff" },
-  cardPressed: { opacity: 0.7 },
-  iconBadge: { width: 40, height: 40, borderRadius: 12, alignItems: "center", justifyContent: "center" },
+  cardUnread: { borderColor: colors.indigoLine, backgroundColor: "#fbfbff" },
+  cardPressed: { opacity: 0.85, transform: [{ scale: 0.985 }] },
+  iconBadge: { width: 42, height: 42, borderRadius: 13, alignItems: "center", justifyContent: "center" },
   cardBody: { flex: 1, marginLeft: 12 },
   titleRow: { flexDirection: "row", alignItems: "center" },
-  title: { flex: 1, fontSize: 15, fontWeight: "600", color: "#334155" },
-  titleUnread: { color: "#0f172a", fontWeight: "700" },
-  dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: "#6366f1", marginLeft: 8 },
-  message: { fontSize: 13, color: "#475569", marginTop: 3, lineHeight: 19 },
-  time: { fontSize: 11, color: "#94a3b8", marginTop: 6 },
+  title: { flex: 1, fontSize: 14.5, fontWeight: "600", color: colors.text },
+  titleUnread: { color: colors.ink, fontWeight: "800" },
+  time: { fontSize: 11, color: colors.faint, marginLeft: 8, fontWeight: "600" },
+  message: { fontSize: 13, color: colors.body, marginTop: 3, lineHeight: 19 },
+  openRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 8 },
+  openText: { fontSize: 12.5, fontWeight: "800" },
+  dot: { width: 9, height: 9, borderRadius: 5, backgroundColor: colors.indigo, marginLeft: 8, marginTop: 4 },
 });

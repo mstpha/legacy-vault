@@ -1,6 +1,9 @@
 import React, { useState } from "react";
-import { View, Text, TextInput, Pressable, StyleSheet, Alert, ActivityIndicator } from "react-native";
+import { View, Text, StyleSheet, Alert } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../context/AuthContext";
+import { AuthLayout, Field, Button, LinkText, ProgressBar } from "../components/ui";
+import { colors } from "../theme";
 
 export default function RegisterScreen({ navigation }) {
   const { register } = useAuth();
@@ -10,6 +13,9 @@ export default function RegisterScreen({ navigation }) {
   const [submitting, setSubmitting] = useState(false);
 
   const canSubmit = fullName.trim().length >= 2 && email.trim() && password.length >= 10;
+  // 0..1 progress towards the 10-character minimum, shown as a small meter.
+  const strength = Math.min(password.length / 10, 1);
+  const longEnough = password.length >= 10;
 
   const onSubmit = async () => {
     const normalizedEmail = email.trim().toLowerCase();
@@ -32,61 +38,62 @@ export default function RegisterScreen({ navigation }) {
   };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Create your account</Text>
-
-      <TextInput style={styles.input} placeholder="Full name" value={fullName} onChangeText={setFullName} />
-      <TextInput
-        style={styles.input}
-        placeholder="Email"
+    <AuthLayout
+      icon="person-add"
+      title="Create your vault"
+      subtitle="It takes less than a minute."
+      onBack={() => navigation.goBack()}
+      footer={
+        <LinkText prefix="Already have an account?" onPress={() => navigation.goBack()}>
+          Log in
+        </LinkText>
+      }
+    >
+      <Field label="Full name" icon="person-outline" placeholder="Jane Doe" value={fullName} onChangeText={setFullName} />
+      <Field
+        label="Email"
+        icon="mail-outline"
+        placeholder="you@example.com"
         autoCapitalize="none"
         autoCorrect={false}
         keyboardType="email-address"
         value={email}
         onChangeText={setEmail}
       />
-      <TextInput
-        style={styles.input}
-        placeholder="Password (min. 10 characters)"
+      <Field
+        label="Password"
+        icon="lock-closed-outline"
+        placeholder="At least 10 characters"
         secureTextEntry
         value={password}
         onChangeText={setPassword}
+        style={styles.passwordField}
       />
+      <ProgressBar value={strength} color={longEnough ? colors.green : colors.amber} height={5} />
+      <View style={styles.meterRow}>
+        <Ionicons
+          name={longEnough ? "checkmark-circle" : "ellipse-outline"}
+          size={14}
+          color={longEnough ? colors.green : colors.faint}
+        />
+        <Text style={[styles.meterText, longEnough && styles.meterTextOk]}>
+          {longEnough
+            ? "Password is long enough"
+            : `${10 - password.length} more character${10 - password.length === 1 ? "" : "s"} needed`}
+        </Text>
+      </View>
 
-      {submitting ? (
-        <ActivityIndicator style={styles.button} />
-      ) : (
-        <Pressable style={[styles.button, !canSubmit && styles.buttonDisabled]} onPress={onSubmit} disabled={!canSubmit}>
-          <Text style={styles.buttonText}>Register</Text>
-        </Pressable>
-      )}
-
-      <Text style={styles.link} onPress={() => navigation.goBack()}>
-        Already have an account? Log in
-      </Text>
-    </View>
+      <Button title="Create account" onPress={onSubmit} disabled={!canSubmit} loading={submitting} style={styles.button} />
+      <Text style={styles.fine}>We'll email you a six-digit code to verify your address.</Text>
+    </AuthLayout>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: "center", padding: 24, backgroundColor: "#fff" },
-  title: { fontSize: 22, fontWeight: "700", textAlign: "center", marginBottom: 28 },
-  input: {
-    borderWidth: 1,
-    borderColor: "#d1d5db",
-    borderRadius: 10,
-    padding: 14,
-    marginBottom: 12,
-    fontSize: 16,
-  },
-  button: {
-    backgroundColor: "#0f172a",
-    borderRadius: 10,
-    padding: 14,
-    alignItems: "center",
-    marginTop: 8,
-  },
-  buttonDisabled: { opacity: 0.5 },
-  buttonText: { color: "#fff", fontSize: 16, fontWeight: "600" },
-  link: { marginTop: 20, color: "#2563eb", textAlign: "center", fontSize: 14 },
+  passwordField: { marginBottom: 10 },
+  meterRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 8 },
+  meterText: { fontSize: 12.5, color: colors.faint, fontWeight: "600" },
+  meterTextOk: { color: colors.greenInk },
+  button: { marginTop: 22 },
+  fine: { fontSize: 12, color: colors.faint, textAlign: "center", marginTop: 12 },
 });

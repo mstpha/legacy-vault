@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, TextInput, Pressable, StyleSheet, Alert, ActivityIndicator, ScrollView } from "react-native";
+import { View, Text, Pressable, StyleSheet, Alert, ActivityIndicator, ScrollView } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
 import * as ImageManipulator from "expo-image-manipulator";
@@ -7,8 +8,16 @@ import { createCapsuleRequest, updateCapsuleRequest, attachFileRequest } from ".
 import { checkBlockedPermission } from "../api/permissionCheck.api";
 import { createEncryptor } from "../utils/encryption";
 import { readAsBase64, formatSize } from "../utils/readFile";
+import { Card, Field, Button, Banner, IconBadge, ActionBar } from "../components/ui";
+import { colors, radius, TYPE_ICONS } from "../theme";
 
 const TYPES = ["DOCUMENT", "CREDENTIAL", "MESSAGE", "IMAGE"];
+const TYPE_HINTS = {
+  DOCUMENT: "Wills, deeds, files",
+  CREDENTIAL: "Passwords, accounts",
+  MESSAGE: "A letter to loved ones",
+  IMAGE: "Photos & scans",
+};
 const MAX_FILE_BYTES = 5 * 1024 * 1024; // 5 MB file ≈ 6.7 MB request; server limit is 10mb
 const MAX_IMAGE_WIDTH = 1600; // images are downscaled to this width before encryption
 const frame = () => new Promise((resolve) => setTimeout(resolve, 30)); // lets React paint before heavy work
@@ -131,113 +140,246 @@ export default function CapsuleCreateScreen({ navigation }) {
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-      {blockedMessage && (
-        <View style={styles.blockedBanner}>
-          <Text style={styles.blockedText}>{blockedMessage}</Text>
-        </View>
-      )}
+    <View style={styles.screen}>
+      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+        {blockedMessage && (
+          <Banner tone="danger" icon="lock-closed" title="Creating capsules is disabled">
+            {blockedMessage}
+          </Banner>
+        )}
 
-      <Text style={styles.label}>Title</Text>
-      <TextInput
-        style={styles.input}
-        placeholder="e.g. Bank accounts + crypto wallet"
-        value={title}
-        onChangeText={setTitle}
-        editable={!busy}
-      />
-
-      <Text style={styles.label}>Type</Text>
-      <View style={styles.typeRow}>
-        {TYPES.map((t) => (
-          <Pressable key={t} style={[styles.chip, type === t && styles.chipActive]} onPress={() => setType(t)} disabled={busy}>
-            <Text style={[styles.chipText, type === t && styles.chipTextActive]}>{t}</Text>
-          </Pressable>
-        ))}
-      </View>
-
-      <Text style={styles.label}>Content (optional — can also be added later)</Text>
-      <TextInput
-        style={[styles.input, styles.multiline]}
-        placeholder="Credentials, a message, notes about where to find a document..."
-        multiline
-        value={content}
-        onChangeText={setContent}
-        editable={!busy}
-      />
-
-      <Text style={styles.label}>Attachments (optional, max {formatSize(MAX_FILE_BYTES)} each)</Text>
-      <View style={styles.attachRow}>
-        {[["📄 Add a document", pickDocument], ["🖼️ Add an image", pickImage]].map(([label, pick]) => (
-          <Pressable key={label} style={[styles.attachButton, busy && styles.dim]} onPress={() => addAttachment(pick)} disabled={busy}>
-            <Text style={styles.attachButtonText}>{label}</Text>
-          </Pressable>
-        ))}
-      </View>
-
-      {attachments.map((a) => (
-        <View key={a.id} style={styles.attachment}>
-          <Text style={styles.attachmentName} numberOfLines={1}>{`${a.name}  ·  ${formatSize(a.size)}`}</Text>
-          <Pressable onPress={() => setAttachments((prev) => prev.filter((x) => x.id !== a.id))} disabled={busy}>
-            <Text style={styles.removeText}>Remove</Text>
-          </Pressable>
-        </View>
-      ))}
-
-      {needsPassphrase && (
-        <>
-          <Text style={styles.label}>Encryption passphrase</Text>
-          <Text style={styles.hint}>
-            Required to encrypt this content and any attachments. You'll need to remember it to read everything back
-            later — it is never sent to or stored on the server.
-          </Text>
-          <TextInput
-            style={styles.input}
-            placeholder="A strong passphrase (min. 8 characters)"
-            secureTextEntry
-            value={passphrase}
-            onChangeText={setPassphrase}
+        <Step n={1} title="Name & type" />
+        <Card>
+          <Field
+            label="Title"
+            icon="pricetag-outline"
+            placeholder="e.g. Bank accounts + crypto wallet"
+            value={title}
+            onChangeText={setTitle}
             editable={!busy}
           />
-        </>
-      )}
+          <Text style={styles.label}>What are you storing?</Text>
+          <View style={styles.typeGrid}>
+            {TYPES.map((t) => {
+              const active = type === t;
+              return (
+                <Pressable
+                  key={t}
+                  style={({ pressed }) => [styles.typeTile, active && styles.typeTileActive, pressed && styles.pressed]}
+                  onPress={() => setType(t)}
+                  disabled={busy}
+                >
+                  <View style={[styles.typeIcon, active && styles.typeIconActive]}>
+                    <Ionicons name={TYPE_ICONS[t]} size={18} color={active ? "#fff" : colors.indigo} />
+                  </View>
+                  <View style={styles.typeBody}>
+                    <Text style={[styles.typeText, active && styles.typeTextActive]}>{t.charAt(0) + t.slice(1).toLowerCase()}</Text>
+                    <Text style={[styles.typeHint, active && styles.typeHintActive]} numberOfLines={1}>
+                      {TYPE_HINTS[t]}
+                    </Text>
+                  </View>
+                  {active && <Ionicons name="checkmark-circle" size={18} color="#fff" style={styles.typeCheck} />}
+                </Pressable>
+              );
+            })}
+          </View>
+        </Card>
 
-      {busy ? (
-        <View style={styles.statusBox}>
-          <ActivityIndicator color="#0f172a" />
-          <Text style={styles.statusText}>{status}</Text>
-        </View>
-      ) : (
-        <Pressable style={[styles.button, !canSubmit && styles.dim]} onPress={onSubmit} disabled={!canSubmit}>
-          <Text style={styles.buttonText}>Create capsule</Text>
-        </Pressable>
-      )}
-    </ScrollView>
+        <Step n={2} title="Secret content" optional />
+        <Card>
+          <Field
+            placeholder="Credentials, a message, notes about where to find a document..."
+            multiline
+            value={content}
+            onChangeText={setContent}
+            editable={!busy}
+            inputStyle={styles.multiline}
+            hint="You can also add or change this later, while the capsule is a draft."
+            style={styles.noMargin}
+          />
+        </Card>
+
+        <Step n={3} title="Attachments" optional />
+        <Card>
+          <View style={styles.attachRow}>
+            {[
+              ["Document", "document-attach-outline", pickDocument],
+              ["Image", "image-outline", pickImage],
+            ].map(([label, icon, pick]) => (
+              <Pressable
+                key={label}
+                style={({ pressed }) => [styles.attachButton, busy && styles.dim, pressed && styles.pressed]}
+                onPress={() => addAttachment(pick)}
+                disabled={busy}
+              >
+                <View style={styles.attachIcon}>
+                  <Ionicons name={icon} size={20} color={colors.indigo} />
+                </View>
+                <Text style={styles.attachButtonText}>Add {label.toLowerCase()}</Text>
+              </Pressable>
+            ))}
+          </View>
+          <Text style={styles.hint}>Max {formatSize(MAX_FILE_BYTES)} per file · encrypted before upload</Text>
+
+          {attachments.map((a) => (
+            <View key={a.id} style={styles.attachment}>
+              <IconBadge
+                name={a.mimeType.startsWith("image/") ? "image" : "document"}
+                color={colors.indigo}
+                soft
+                size={36}
+                iconSize={17}
+              />
+              <View style={styles.attachmentBody}>
+                <Text style={styles.attachmentName} numberOfLines={1}>
+                  {a.name}
+                </Text>
+                <Text style={styles.attachmentSize}>{formatSize(a.size)}</Text>
+              </View>
+              <Pressable onPress={() => setAttachments((prev) => prev.filter((x) => x.id !== a.id))} disabled={busy} hitSlop={10}>
+                <Ionicons name="close-circle" size={22} color={colors.ghost} />
+              </Pressable>
+            </View>
+          ))}
+        </Card>
+
+        {needsPassphrase && (
+          <>
+            <Step n={4} title="Encryption passphrase" />
+            <Card>
+              <Field
+                placeholder="A strong passphrase (min. 8 characters)"
+                icon="key-outline"
+                secureTextEntry
+                value={passphrase}
+                onChangeText={setPassphrase}
+                editable={!busy}
+              />
+              <Banner tone="action" icon="information-circle" style={styles.noMargin}>
+                Remember it: you'll need it to read everything back. It's never sent to or stored on the server.
+              </Banner>
+            </Card>
+          </>
+        )}
+      </ScrollView>
+
+      <ActionBar>
+        {busy ? (
+          <View style={styles.statusBox}>
+            <ActivityIndicator color={colors.ink} />
+            <Text style={styles.statusText} numberOfLines={1}>
+              {status}
+            </Text>
+          </View>
+        ) : (
+          <Button title="Create capsule" icon="lock-closed" onPress={onSubmit} disabled={!canSubmit} style={styles.flex} />
+        )}
+      </ActionBar>
+    </View>
+  );
+}
+
+function Step({ n, title, optional }) {
+  return (
+    <View style={styles.step}>
+      <View style={styles.stepNumber}>
+        <Text style={styles.stepNumberText}>{n}</Text>
+      </View>
+      <Text style={styles.stepTitle}>{title}</Text>
+      {optional && <Text style={styles.optional}>Optional</Text>}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 24, backgroundColor: "#fff", flexGrow: 1 },
-  label: { fontSize: 13, fontWeight: "700", color: "#374151", marginTop: 16, marginBottom: 6 },
-  hint: { fontSize: 12, color: "#999", marginBottom: 8 },
-  input: { borderWidth: 1, borderColor: "#d1d5db", borderRadius: 10, padding: 14, fontSize: 16 },
-  multiline: { minHeight: 100, textAlignVertical: "top" },
-  typeRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  chip: { borderWidth: 1, borderColor: "#d1d5db", borderRadius: 999, paddingVertical: 8, paddingHorizontal: 14 },
-  chipActive: { backgroundColor: "#0f172a", borderColor: "#0f172a" },
-  chipText: { fontSize: 13, color: "#374151" },
-  chipTextActive: { color: "#fff" },
-  attachRow: { flexDirection: "row", gap: 8 },
-  attachButton: { flex: 1, borderWidth: 1, borderColor: "#d1d5db", borderRadius: 10, padding: 12, alignItems: "center" },
-  attachButtonText: { fontSize: 13, color: "#374151", fontWeight: "600" },
-  attachment: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", backgroundColor: "#f3f4f6", borderRadius: 8, padding: 10, marginTop: 8 },
-  attachmentName: { flex: 1, fontSize: 13, marginRight: 8 },
-  removeText: { color: "#ef4444", fontSize: 13 },
-  blockedBanner: { backgroundColor: "#fef2f2", borderRadius: 10, padding: 12, borderWidth: 1, borderColor: "#fecaca" },
-  blockedText: { color: "#b91c1c", fontSize: 13, lineHeight: 19 },
-  button: { backgroundColor: "#0f172a", borderRadius: 10, padding: 14, alignItems: "center", marginTop: 28 },
-  buttonText: { color: "#fff", fontSize: 16, fontWeight: "600" },
+  screen: { flex: 1, backgroundColor: colors.canvas },
+  container: { padding: 20, paddingTop: 8, paddingBottom: 32 },
+  flex: { flex: 1 },
+  label: { fontSize: 13, fontWeight: "700", color: colors.text, marginBottom: 8 },
+  hint: { fontSize: 12, color: colors.faint, marginTop: 10, textAlign: "center" },
+  noMargin: { marginBottom: 0 },
+  multiline: { minHeight: 120, textAlignVertical: "top" },
   dim: { opacity: 0.5 },
-  statusBox: { alignItems: "center", marginTop: 28, gap: 10 },
-  statusText: { fontSize: 14, color: "#374151" },
+  pressed: { opacity: 0.85, transform: [{ scale: 0.985 }] },
+
+  step: { flexDirection: "row", alignItems: "center", marginTop: 10, marginBottom: 10 },
+  stepNumber: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: colors.ink,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 10,
+  },
+  stepNumberText: { color: "#fff", fontSize: 12, fontWeight: "800" },
+  stepTitle: { flex: 1, fontSize: 15, fontWeight: "800", color: colors.ink },
+  optional: { fontSize: 11.5, fontWeight: "700", color: colors.faint },
+
+  typeGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  typeTile: {
+    width: "48.5%",
+    flexGrow: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 10,
+    borderRadius: radius.md + 2,
+    borderWidth: 1.5,
+    borderColor: colors.line,
+    backgroundColor: colors.canvas,
+  },
+  typeTileActive: { backgroundColor: colors.ink, borderColor: colors.ink },
+  typeIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 11,
+    backgroundColor: colors.indigoSoft,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  typeIconActive: { backgroundColor: "rgba(255,255,255,0.14)" },
+  typeBody: { flex: 1, marginLeft: 10 },
+  typeText: { fontSize: 13.5, fontWeight: "800", color: colors.ink },
+  typeTextActive: { color: "#fff" },
+  typeHint: { fontSize: 11, color: colors.muted, marginTop: 1 },
+  typeHintActive: { color: colors.ghost },
+  typeCheck: { marginLeft: 4 },
+
+  attachRow: { flexDirection: "row", gap: 10 },
+  attachButton: {
+    flex: 1,
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 18,
+    borderRadius: radius.md + 2,
+    borderWidth: 1.5,
+    borderStyle: "dashed",
+    borderColor: colors.indigoLine,
+    backgroundColor: "#f8f9ff",
+  },
+  attachIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 13,
+    backgroundColor: colors.indigoSoft,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  attachButtonText: { fontSize: 13, color: colors.indigoInk, fontWeight: "800" },
+  attachment: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: colors.canvas,
+    borderWidth: 1,
+    borderColor: colors.hairline,
+    borderRadius: radius.md,
+    padding: 10,
+    marginTop: 10,
+  },
+  attachmentBody: { flex: 1, marginHorizontal: 10 },
+  attachmentName: { fontSize: 13.5, fontWeight: "700", color: colors.ink },
+  attachmentSize: { fontSize: 11.5, color: colors.faint, marginTop: 1 },
+
+  statusBox: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 12, minHeight: 52 },
+  statusText: { fontSize: 14, color: colors.text, fontWeight: "700", flexShrink: 1 },
 });

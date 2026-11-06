@@ -13,13 +13,9 @@ const {
 } = require("./token.service");
 const { ApiError } = require("../middleware/errorHandler");
 
-async function writeAuditLog({ userId, action, metadata }) {
-  // Sprint 1: plain insert. Hash-chaining (prevHash/hash) is added in Sprint 5.
-  await prisma.auditLog.create({ data: { userId, action, metadata } }).catch((err) => {
-    // Audit logging must never block the primary flow, but it must be loud if it fails.
-    logger.error("Failed to write audit log", { action, err: err.message });
-  });
-}
+// Sprint 6 fix: this file used to define its own plain-insert writeAuditLog (Sprint 1 leftover).
+// Those rows had no hash, so verifyAuditChain() reported the chain as broken after the first login.
+const { writeAuditLog } = require("./audit.service");
 
 
 async function register({ email, password, fullName }) {
@@ -54,6 +50,8 @@ async function register({ email, password, fullName }) {
       emailVerificationAttempts: 0,
     },
   });
+
+  writeAuditLog({ userId: user.id, action: "USER_REGISTERED" });
 
   const { html, text } = renderEmail({
     recipientName: normalizedName,
@@ -176,7 +174,7 @@ async function verifyEmail({ email, code }) {
     },
   });
 
-  // If your project uses audit logging, record EMAIL_VERIFIED here.
+  writeAuditLog({ userId: user.id, action: "EMAIL_VERIFIED" });
 
   return { message: "Email verified successfully. You can now log in." };
 }

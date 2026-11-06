@@ -1,5 +1,6 @@
 import React, { useCallback, useRef, useState } from "react";
-import { View, Text, TextInput, Pressable, StyleSheet, Alert, ActivityIndicator, ScrollView } from "react-native";
+import { View, Text, Pressable, StyleSheet, Alert, ActivityIndicator, ScrollView } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
@@ -16,26 +17,8 @@ import { confirmSensitive } from "../utils/biometricLock";
 import { openWithDeviceKey } from "../utils/deviceKeys";
 import { useAuth } from "../context/AuthContext";
 import { readViaFetch } from "../utils/readFile";
-
-const STATE_LABELS = {
-  DRAFT: "Draft",
-  ACTIVE: "Active",
-  INACTIVITY_ALERT: "Inactivity alert",
-  PENDING_VALIDATION: "Pending validation",
-  UNLOCKED: "Unlocked",
-  ARCHIVED: "Opened",
-  REVOKED: "Revoked",
-};
-
-const STATE_COLORS = {
-  DRAFT: "#64748b",
-  ACTIVE: "#16a34a",
-  INACTIVITY_ALERT: "#d97706",
-  PENDING_VALIDATION: "#6366f1",
-  UNLOCKED: "#0ea5e9",
-  ARCHIVED: "#64748b",
-  REVOKED: "#ef4444",
-};
+import { Card, Field, Button, Banner, IconBadge, Loading, Hero, HeroPills, HeroPill, Lifecycle, ProgressBar, Divider } from "../components/ui";
+import { colors, radius, STATE_LABELS, STATE_COLORS } from "../theme";
 
 const paint = () => new Promise((resolve) => setTimeout(resolve, 60)); // lets the spinner render before a heavy decrypt
 
@@ -107,13 +90,7 @@ export default function SharedCapsuleScreen({ route, navigation }) {
     )
   );
 
-  if (loading || !capsule) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" />
-      </View>
-    );
-  }
+  if (loading || !capsule) return <Loading />;
 
   const { roles } = capsule;
   const unlocked = ["UNLOCKED", "ARCHIVED"].includes(capsule.state);
@@ -261,60 +238,77 @@ export default function SharedCapsuleScreen({ route, navigation }) {
     : "Nothing is needed from you right now. You'll be notified if the owner stays inactive and validation is required.";
 
   return (
-    <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-      <Text style={styles.title}>{capsule.title}</Text>
-      <Text style={styles.owner}>Owner: {capsule.testatorName}</Text>
+    <ScrollView style={styles.screen} contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+      {/* --- Hero --- */}
+      <Hero
+        icon={unlocked ? "lock-open" : capsule.state === "REVOKED" ? "ban" : "lock-closed"}
+        eyebrow={`From ${capsule.testatorName || "—"}`}
+        title={capsule.title}
+        subtitle={statusMessage(capsule)}
+      >
+        <HeroPills>
+          <HeroPill label={STATE_LABELS[capsule.state] || capsule.state} dot={STATE_COLORS[capsule.state]} />
+          {roles.guarantor && <HeroPill label="You're a guarantor" icon="shield-checkmark" />}
+          {roles.beneficiary && <HeroPill label="You're a beneficiary" icon="gift" />}
+        </HeroPills>
+      </Hero>
 
-      <View style={styles.pillRow}>
-        <View style={[styles.statePill, { backgroundColor: STATE_COLORS[capsule.state] || "#64748b" }]}>
-          <Text style={styles.statePillText}>{STATE_LABELS[capsule.state] || capsule.state}</Text>
-        </View>
-        {roles.guarantor && (
-          <View style={styles.rolePill}>
-            <Text style={styles.rolePillText}>Guarantor</Text>
-          </View>
-        )}
-        {roles.beneficiary && (
-          <View style={styles.rolePill}>
-            <Text style={styles.rolePillText}>Beneficiary</Text>
-          </View>
-        )}
-      </View>
-
-      <Text style={styles.status}>{statusMessage(capsule)}</Text>
+      {capsule.state !== "REVOKED" && (
+        <Card style={styles.lifeCard}>
+          <Lifecycle state={capsule.state} />
+        </Card>
+      )}
 
       {roles.guarantor && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>As guarantor</Text>
+        <Card>
+          <SectionHead icon="shield-checkmark" color={colors.indigo} title="As guarantor" subtitle="You confirm when the owner can't" />
           {capsule.state === "PENDING_VALIDATION" ? (
             <>
-              <Text style={styles.body}>
-                {capsule.validationsReceived} of {capsule.validationThreshold} validations received.
-              </Text>
+              <View style={styles.progressHead}>
+                <Text style={styles.body}>Validations received</Text>
+                <Text style={styles.progressCount}>
+                  {capsule.validationsReceived} / {capsule.validationThreshold}
+                </Text>
+              </View>
+              <ProgressBar
+                value={capsule.validationsReceived / Math.max(1, capsule.validationThreshold)}
+                track={colors.indigoSoft}
+                height={8}
+                style={styles.progress}
+              />
               {capsule.hasValidated ? (
-                <Text style={styles.done}>✓ You've validated this capsule.</Text>
+                <Banner tone="success" style={styles.doneBanner}>
+                  You've validated this capsule.
+                </Banner>
               ) : (
-                <Pressable style={[styles.primary, validating && styles.dimmed]} onPress={onValidate} disabled={validating}>
-                  {validating ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>Validate capsule</Text>}
-                </Pressable>
+                <Button title="Validate capsule" icon="checkmark-done-circle" onPress={onValidate} loading={validating} style={styles.primary} />
               )}
             </>
           ) : (
-            <Text style={styles.body}>{guarantorHint}</Text>
+            <View style={styles.infoBox}>
+              <Ionicons name={capsule.hasValidated ? "checkmark-circle" : "time-outline"} size={20} color={capsule.hasValidated ? colors.green : colors.faint} />
+              <Text style={styles.infoText}>{guarantorHint}</Text>
+            </View>
           )}
-        </View>
+        </Card>
       )}
 
       {roles.beneficiary && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>As beneficiary</Text>
+        <Card>
+          <SectionHead icon="gift" color={colors.sky} title="As beneficiary" subtitle="Read-only, as often as you like" />
 
           {!unlocked ? (
-            <Text style={styles.body}>
-              {capsule.state === "REVOKED"
-                ? "This capsule was revoked, so there is nothing to open."
-                : "This capsule is locked. You'll be notified as soon as it's unlocked."}
-            </Text>
+            <View style={styles.lockedBox}>
+              <View style={styles.lockedIcon}>
+                <Ionicons name={capsule.state === "REVOKED" ? "ban-outline" : "lock-closed"} size={26} color={colors.faint} />
+              </View>
+              <Text style={styles.lockedTitle}>{capsule.state === "REVOKED" ? "Nothing to open" : "Still locked"}</Text>
+              <Text style={styles.lockedText}>
+                {capsule.state === "REVOKED"
+                  ? "This capsule was revoked, so there is nothing to open."
+                  : "This capsule is locked. You'll be notified as soon as it's unlocked."}
+              </Text>
+            </View>
           ) : !capsule.hasContent && !hasFiles ? (
             <Text style={styles.body}>This capsule has no content.</Text>
           ) : (
@@ -322,96 +316,185 @@ export default function SharedCapsuleScreen({ route, navigation }) {
               {capsule.hasKeyShare && (
                 <>
                   <Pressable
-                    style={[styles.primary, (deviceBusy || opening) && styles.dimmed]}
                     onPress={onUnlockWithDevice}
                     disabled={deviceBusy || opening}
+                    style={({ pressed }) => [styles.deviceUnlock, (deviceBusy || opening) && styles.dim, pressed && styles.pressed]}
                   >
-                    {deviceBusy ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>Unlock with this device</Text>}
+                    <View style={styles.deviceIcon}>
+                      {deviceBusy ? <ActivityIndicator color="#fff" /> : <Ionicons name="finger-print" size={26} color="#fff" />}
+                    </View>
+                    <View style={styles.deviceBody}>
+                      <Text style={styles.deviceTitle}>Unlock with this device</Text>
+                      <Text style={styles.deviceText}>Use your fingerprint, face or PIN</Text>
+                    </View>
+                    <Ionicons name="arrow-forward" size={18} color="#fff" />
                   </Pressable>
-                  <Text style={styles.orText}>or enter the passphrase</Text>
+                  <Divider label="or enter the passphrase" />
                 </>
               )}
               <Text style={styles.hint}>
-                Read-only. You can open this as often as you like. The content is encrypted: enter the passphrase{" "}
-                {owner} gave you, and it's decrypted on this device only.
+                Enter the passphrase {owner} gave you. It's decrypted on this device only.
               </Text>
               <View style={styles.row}>
-                <TextInput
-                  style={styles.input}
+                <Field
                   placeholder="Passphrase"
+                  icon="key-outline"
                   secureTextEntry
                   value={passphrase}
                   onChangeText={setPassphrase}
                   editable={!opening && !fileBusyId}
+                  style={styles.rowField}
                 />
                 {capsule.hasContent && (
-                  <Pressable
-                    style={[styles.openButton, (!passphrase || opening) && styles.dimmed]}
+                  <Button
+                    title="Open"
+                    icon="eye"
+                    compact
                     onPress={() => onOpenText()}
-                    disabled={!passphrase || opening}
-                  >
-                    {opening ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>Open</Text>}
-                  </Pressable>
+                    disabled={!passphrase}
+                    loading={opening}
+                    style={styles.openButton}
+                  />
                 )}
               </View>
               {opening && <Text style={styles.hint}>Decrypting… this can take a few seconds.</Text>}
-              {content !== null && <Text style={styles.content}>{content}</Text>}
+              {content !== null && (
+                <View style={styles.content}>
+                  <View style={styles.contentHead}>
+                    <Ionicons name="lock-open" size={13} color={colors.greenInk} />
+                    <Text style={styles.contentLabel}>Decrypted on this device</Text>
+                  </View>
+                  <Text selectable style={styles.contentText}>
+                    {content}
+                  </Text>
+                </View>
+              )}
 
               {hasFiles && (
                 <View style={styles.files}>
                   <Text style={styles.filesTitle}>Attached files</Text>
-                  {capsule.files.map((f) => (
-                    <View key={f.id} style={styles.fileRow}>
+                  {capsule.files.map((f, i) => (
+                    <View key={f.id} style={[styles.fileRow, i === capsule.files.length - 1 && styles.lastRow]}>
+                      <IconBadge name="document" color={colors.indigo} soft size={36} iconSize={17} />
                       <Text style={styles.fileName} numberOfLines={1}>
-                        📎 {f.fileName}
+                        {f.fileName}
                       </Text>
-                      <Pressable
-                        style={[styles.fileButton, fileBusyId && styles.dimmed]}
+                      <Button
+                        title="Open"
+                        variant="secondary"
+                        compact
                         onPress={() => onOpenFile(f)}
-                        disabled={!!fileBusyId}
-                      >
-                        {fileBusyId === f.id ? <ActivityIndicator size="small" color="#0f172a" /> : <Text style={styles.fileButtonText}>Open</Text>}
-                      </Pressable>
+                        disabled={!!fileBusyId && fileBusyId !== f.id}
+                        loading={fileBusyId === f.id}
+                        style={styles.fileButton}
+                      />
                     </View>
                   ))}
                 </View>
               )}
             </>
           )}
-        </View>
+        </Card>
       )}
     </ScrollView>
   );
 }
 
+function SectionHead({ icon, color, title, subtitle }) {
+  return (
+    <View style={styles.sectionHead}>
+      <IconBadge name={icon} color={color} soft size={36} iconSize={17} />
+      <View style={styles.sectionHeading}>
+        <Text style={styles.sectionTitle}>{title}</Text>
+        <Text style={styles.sectionSubtitle}>{subtitle}</Text>
+      </View>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
-  center: { flex: 1, alignItems: "center", justifyContent: "center" },
-  container: { padding: 24, backgroundColor: "#fff", flexGrow: 1 },
-  title: { fontSize: 22, fontWeight: "700", color: "#0f172a" },
-  owner: { fontSize: 13, color: "#64748b", marginTop: 4 },
-  pillRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 14 },
-  statePill: { borderRadius: 999, paddingVertical: 4, paddingHorizontal: 12 },
-  statePillText: { color: "#fff", fontSize: 12, fontWeight: "700" },
-  rolePill: { borderRadius: 999, paddingVertical: 4, paddingHorizontal: 12, backgroundColor: "#f1f5f9" },
-  rolePillText: { color: "#334155", fontSize: 12, fontWeight: "600" },
-  status: { fontSize: 14, color: "#475569", lineHeight: 21, marginTop: 16 },
-  section: { marginTop: 28 },
-  sectionTitle: { fontSize: 13, fontWeight: "700", color: "#374151", textTransform: "uppercase", marginBottom: 8 },
-  body: { fontSize: 14, color: "#475569", lineHeight: 21 },
-  hint: { fontSize: 12, color: "#94a3b8", marginBottom: 8, lineHeight: 18 },
-  done: { fontSize: 15, fontWeight: "600", color: "#16a34a", marginTop: 10 },
-  primary: { backgroundColor: "#0f172a", borderRadius: 10, padding: 14, alignItems: "center", marginTop: 12 },
-  primaryText: { color: "#fff", fontSize: 15, fontWeight: "600" },
-  dimmed: { opacity: 0.6 },
-  orText: { textAlign: "center", fontSize: 12, color: "#94a3b8", marginVertical: 12 },
-  row: { flexDirection: "row", gap: 8 },
-  input: { flex: 1, borderWidth: 1, borderColor: "#d1d5db", borderRadius: 8, padding: 10 },
-  openButton: { backgroundColor: "#0f172a", borderRadius: 8, paddingHorizontal: 18, justifyContent: "center", alignItems: "center", minWidth: 72 },
-  content: { marginTop: 14, backgroundColor: "#f3f4f6", borderRadius: 8, padding: 12, fontSize: 14, lineHeight: 21 },
-  files: { marginTop: 20 },
-  filesTitle: { fontSize: 12, fontWeight: "700", color: "#64748b", marginBottom: 6 },
-  fileRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 6 },
-  fileName: { flex: 1, fontSize: 14, marginRight: 10 },
-  fileButton: { borderWidth: 1, borderColor: "#d1d5db", borderRadius: 8, paddingVertical: 6, paddingHorizontal: 16, minWidth: 64, alignItems: "center" },
-  fileButtonText: { color: "#0f172a", fontSize: 13, fontWeight: "600" },
+  screen: { flex: 1, backgroundColor: colors.canvas },
+  container: { padding: 20, paddingTop: 4, paddingBottom: 48 },
+  pressed: { opacity: 0.85, transform: [{ scale: 0.985 }] },
+  dim: { opacity: 0.5 },
+
+  lifeCard: { paddingVertical: 14, paddingHorizontal: 8 },
+
+  sectionHead: { flexDirection: "row", alignItems: "center", marginBottom: 14 },
+  sectionHeading: { flex: 1, marginLeft: 12 },
+  sectionTitle: { fontSize: 15.5, fontWeight: "800", color: colors.ink },
+  sectionSubtitle: { fontSize: 12, color: colors.muted, marginTop: 1 },
+  body: { fontSize: 14, color: colors.body, lineHeight: 21 },
+  hint: { fontSize: 12.5, color: colors.muted, marginBottom: 10, lineHeight: 18 },
+
+  infoBox: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: colors.canvas, borderRadius: radius.md, padding: 14 },
+  infoText: { flex: 1, fontSize: 13.5, color: colors.body, lineHeight: 20 },
+
+  progressHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  progressCount: { fontSize: 15, fontWeight: "800", color: colors.indigo },
+  progress: { marginTop: 8 },
+  doneBanner: { marginTop: 14, marginBottom: 0 },
+  primary: { marginTop: 14 },
+
+  lockedBox: { alignItems: "center", backgroundColor: colors.canvas, borderRadius: radius.lg, paddingVertical: 22, paddingHorizontal: 18 },
+  lockedIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 18,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.line,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  lockedTitle: { fontSize: 15.5, fontWeight: "800", color: colors.ink, marginTop: 12 },
+  lockedText: { fontSize: 13, color: colors.muted, textAlign: "center", marginTop: 4, lineHeight: 19 },
+
+  deviceUnlock: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: colors.ink,
+    borderRadius: radius.lg,
+    padding: 14,
+  },
+  deviceIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 15,
+    backgroundColor: "rgba(255,255,255,0.12)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  deviceBody: { flex: 1, marginLeft: 14 },
+  deviceTitle: { fontSize: 15.5, fontWeight: "800", color: "#fff" },
+  deviceText: { fontSize: 12.5, color: colors.ghost, marginTop: 2 },
+
+  row: { flexDirection: "row", alignItems: "flex-start", gap: 8 },
+  rowField: { flex: 1, marginBottom: 0 },
+  openButton: { minHeight: 50, borderRadius: radius.md + 2, minWidth: 84 },
+
+  content: {
+    marginTop: 14,
+    backgroundColor: colors.greenSoft,
+    borderWidth: 1,
+    borderColor: "#bbf7d0",
+    borderRadius: radius.md,
+    padding: 12,
+  },
+  contentHead: { flexDirection: "row", alignItems: "center", gap: 5, marginBottom: 6 },
+  contentLabel: { fontSize: 11, fontWeight: "800", color: colors.greenInk, textTransform: "uppercase", letterSpacing: 0.5 },
+  contentText: { fontSize: 14, color: colors.ink, lineHeight: 21 },
+
+  files: { marginTop: 18 },
+  filesTitle: { fontSize: 12, fontWeight: "800", color: colors.faint, textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 4 },
+  fileRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 9,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.hairline,
+  },
+  lastRow: { borderBottomWidth: 0 },
+  fileName: { flex: 1, fontSize: 14, color: colors.ink, marginHorizontal: 12, fontWeight: "600" },
+  fileButton: { minWidth: 72 },
 });

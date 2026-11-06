@@ -1,6 +1,8 @@
 import React, { useState } from "react";
-import { View, Text, TextInput, Pressable, StyleSheet, Alert, ActivityIndicator } from "react-native";
+import { Alert, StyleSheet, Text } from "react-native";
 import { useAuth } from "../context/AuthContext";
+import { AuthLayout, CodeField, Button, LinkText } from "../components/ui";
+import { colors } from "../theme";
 
 export default function MfaVerifyScreen({ navigation }) {
   const { mfaPendingEmail, submitMfaCode, cancelMfaLogin } = useAuth();
@@ -25,52 +27,20 @@ export default function MfaVerifyScreen({ navigation }) {
   };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Two-factor verification</Text>
-      <Text style={styles.subtitle}>
-        Enter the 6-digit code from your authenticator app{mfaPendingEmail ? ` for ${mfaPendingEmail}` : ""}.
-      </Text>
-
-      <TextInput
-        style={styles.input}
-        placeholder="123456"
-        keyboardType="number-pad"
-        maxLength={6}
-        value={code}
-        onChangeText={setCode}
-      />
-
-      {submitting ? (
-        <ActivityIndicator style={styles.button} />
-      ) : (
-        <Pressable style={[styles.button, code.length !== 6 && styles.buttonDisabled]} onPress={onSubmit} disabled={code.length !== 6}>
-          <Text style={styles.buttonText}>Verify</Text>
-        </Pressable>
-      )}
-
-      <Text style={styles.link} onPress={onCancel}>
-        Cancel
-      </Text>
-    </View>
+    <AuthLayout
+      icon="shield-checkmark"
+      title="Two-factor check"
+      subtitle={`Open your authenticator app and enter the 6-digit code${mfaPendingEmail ? ` for ${mfaPendingEmail}` : ""}.`}
+      onBack={onCancel}
+      footer={<LinkText onPress={onCancel}>Cancel and go back</LinkText>}
+    >
+      <CodeField value={code} onChangeText={setCode} autoFocus />
+      <Button title="Verify" icon="shield-checkmark" onPress={onSubmit} disabled={code.length !== 6} loading={submitting} />
+      <Text style={styles.fine}>Codes refresh every 30 seconds.</Text>
+    </AuthLayout>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: "center", padding: 24, backgroundColor: "#fff" },
-  title: { fontSize: 22, fontWeight: "700", textAlign: "center" },
-  subtitle: { fontSize: 14, color: "#666", textAlign: "center", marginTop: 8, marginBottom: 28 },
-  input: {
-    borderWidth: 1,
-    borderColor: "#d1d5db",
-    borderRadius: 10,
-    padding: 14,
-    marginBottom: 12,
-    fontSize: 20,
-    textAlign: "center",
-    letterSpacing: 6,
-  },
-  button: { backgroundColor: "#0f172a", borderRadius: 10, padding: 14, alignItems: "center", marginTop: 8 },
-  buttonDisabled: { opacity: 0.5 },
-  buttonText: { color: "#fff", fontSize: 16, fontWeight: "600" },
-  link: { marginTop: 20, color: "#2563eb", textAlign: "center", fontSize: 14 },
+  fine: { fontSize: 12, color: colors.faint, textAlign: "center", marginTop: 12 },
 });

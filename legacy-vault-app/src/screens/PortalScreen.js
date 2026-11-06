@@ -1,30 +1,12 @@
 import React, { useCallback, useState } from "react";
-import { View, Text, FlatList, Pressable, StyleSheet, RefreshControl, ActivityIndicator } from "react-native";
+import { View, Text, FlatList, Pressable, StyleSheet, RefreshControl } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import { listCapsulesRequest } from "../api/capsule.api";
+import { Banner, EmptyState, StatePill, Pill, IconBadge, Loading, Hero, HeroStats, SectionLabel } from "../components/ui";
+import { colors, radius, shadow, STATE_COLORS, TYPE_ICONS } from "../theme";
 
 // One screen, two portals: the navigator passes route.params.role = "guarantor" | "beneficiary".
-const STATE_LABELS = {
-  DRAFT: "Draft",
-  ACTIVE: "Active",
-  INACTIVITY_ALERT: "Inactivity alert",
-  PENDING_VALIDATION: "Pending validation",
-  UNLOCKED: "Unlocked",
-  ARCHIVED: "Opened",
-  REVOKED: "Revoked",
-};
-
-const STATE_COLORS = {
-  DRAFT: "#64748b",
-  ACTIVE: "#16a34a",
-  INACTIVITY_ALERT: "#d97706",
-  PENDING_VALIDATION: "#6366f1",
-  UNLOCKED: "#0ea5e9",
-  ARCHIVED: "#64748b",
-  REVOKED: "#ef4444",
-};
-
 const PORTALS = {
   guarantor: {
     title: "Guarantor portal",
@@ -32,7 +14,9 @@ const PORTALS = {
     icon: "shield-checkmark",
     actionState: "PENDING_VALIDATION",
     actionLabel: "Validation needed",
+    actionStat: "To validate",
     actionSummary: (n) => `${n} capsule${n > 1 ? "s" : ""} waiting for your validation`,
+    emptyTitle: "No capsules to guard yet",
     empty: "You haven't been named as a guarantor on any capsule yet.",
     listKey: "asGuarantor",
   },
@@ -42,7 +26,9 @@ const PORTALS = {
     icon: "gift",
     actionState: "UNLOCKED",
     actionLabel: "Ready to open",
+    actionStat: "Ready to open",
     actionSummary: (n) => `${n} capsule${n > 1 ? "s" : ""} ready to open`,
+    emptyTitle: "Nothing left to you yet",
     empty: "You haven't been named as a beneficiary on any capsule yet.",
     listKey: "asBeneficiary",
   },
@@ -75,13 +61,7 @@ export default function PortalScreen({ route, navigation }) {
     setRefreshing(false);
   };
 
-  if (!data && !failed) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" />
-      </View>
-    );
-  }
+  if (!data && !failed) return <Loading />;
 
   // Capsules that need the user come first.
   const capsules = [...(data?.[portal.listKey] || [])].sort(
@@ -89,6 +69,7 @@ export default function PortalScreen({ route, navigation }) {
   );
   const blockedMessage = route.params?.role === "guarantor" ? data?.blocked?.guarantor : null;
   const actionCount = capsules.filter((c) => c.state === portal.actionState).length;
+  const owners = new Set(capsules.map((c) => c.testator?.fullName).filter(Boolean)).size;
 
   return (
     <FlatList
@@ -98,50 +79,67 @@ export default function PortalScreen({ route, navigation }) {
       keyExtractor={(c) => c.id}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       ListHeaderComponent={
-        <View style={styles.header}>
-          <View style={styles.headerIcon}>
-            <Ionicons name={portal.icon} size={22} color="#fff" />
-          </View>
-          <Text style={styles.intro}>{portal.intro}</Text>
+        <View>
+          <Hero icon={portal.icon} eyebrow="Portal" title={portal.title} subtitle={portal.intro}>
+            {!blockedMessage && (
+              <HeroStats
+                items={[
+                  { value: capsules.length, label: "Capsules" },
+                  { value: actionCount, label: portal.actionStat },
+                  { value: owners, label: owners === 1 ? "Owner" : "Owners" },
+                ]}
+              />
+            )}
+          </Hero>
           {actionCount > 0 && !blockedMessage && (
-            <View style={styles.actionBanner}>
-              <Ionicons name="alert-circle" size={18} color="#4338ca" />
-              <Text style={styles.actionBannerText}>{portal.actionSummary(actionCount)}</Text>
-            </View>
+            <Banner tone="action" title="Your attention is needed">
+              {portal.actionSummary(actionCount)}
+            </Banner>
           )}
+          {capsules.length > 0 && !blockedMessage && <SectionLabel>All capsules</SectionLabel>}
         </View>
       }
       ListEmptyComponent={
         blockedMessage ? (
-          <Text style={styles.blocked}>🔒 {blockedMessage}</Text>
+          <Banner tone="danger" icon="lock-closed">
+            {blockedMessage}
+          </Banner>
         ) : (
-          <Text style={styles.empty}>{failed ? "Couldn't load your capsules. Pull down to retry." : portal.empty}</Text>
+          <View style={styles.emptyCard}>
+            <EmptyState
+              icon={failed ? "cloud-offline-outline" : portal.icon}
+              title={failed ? "Couldn't load your capsules" : portal.emptyTitle}
+              text={failed ? "Pull down to retry." : portal.empty}
+            />
+          </View>
         )
       }
       renderItem={({ item }) => {
         const needsAction = item.state === portal.actionState;
+        const stateColor = STATE_COLORS[item.state] || colors.muted;
         return (
           <Pressable
             style={({ pressed }) => [styles.card, needsAction && styles.cardAction, pressed && styles.pressed]}
             onPress={() => navigation.navigate("SharedCapsule", { capsuleId: item.id })}
           >
-            <View style={styles.cardTop}>
+            <View style={[styles.stripe, { backgroundColor: stateColor }]} />
+            <IconBadge name={TYPE_ICONS[item.type] || "archive"} color={stateColor} soft size={44} iconSize={21} />
+            <View style={styles.cardBody}>
               <Text style={styles.cardTitle} numberOfLines={1}>
                 {item.title}
               </Text>
-              <Ionicons name="chevron-forward" size={18} color="#cbd5e1" />
-            </View>
-            <Text style={styles.owner}>Owner: {item.testator?.fullName || "—"}</Text>
-            <View style={styles.pillRow}>
-              <View style={[styles.pill, { backgroundColor: STATE_COLORS[item.state] || "#64748b" }]}>
-                <Text style={styles.pillText}>{STATE_LABELS[item.state] || item.state}</Text>
+              <View style={styles.ownerRow}>
+                <Ionicons name="person-circle-outline" size={14} color={colors.faint} />
+                <Text style={styles.owner} numberOfLines={1}>
+                  {item.testator?.fullName || "—"}
+                </Text>
               </View>
-              {needsAction && (
-                <View style={styles.actionPill}>
-                  <Text style={styles.actionPillText}>{portal.actionLabel}</Text>
-                </View>
-              )}
+              <View style={styles.pillRow}>
+                <StatePill state={item.state} />
+                {needsAction && <Pill label={portal.actionLabel} color={colors.indigo} soft={false} icon="alert-circle" />}
+              </View>
             </View>
+            <Ionicons name="chevron-forward" size={18} color={colors.ghost} />
           </Pressable>
         );
       }}
@@ -150,25 +148,34 @@ export default function PortalScreen({ route, navigation }) {
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: "#f8fafc" },
-  center: { flex: 1, alignItems: "center", justifyContent: "center" },
-  container: { padding: 20, paddingBottom: 48 },
-  header: { marginBottom: 18 },
-  headerIcon: { width: 44, height: 44, borderRadius: 14, backgroundColor: "#0f172a", alignItems: "center", justifyContent: "center" },
-  intro: { fontSize: 14, color: "#475569", lineHeight: 21, marginTop: 12 },
-  actionBanner: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#eef2ff", borderRadius: 10, padding: 12, marginTop: 14 },
-  actionBannerText: { color: "#4338ca", fontSize: 13, fontWeight: "600", flex: 1 },
-  empty: { color: "#94a3b8", fontSize: 14, fontStyle: "italic", textAlign: "center", marginTop: 24 },
-  blocked: { color: "#b91c1c", backgroundColor: "#fef2f2", borderRadius: 10, padding: 12, fontSize: 13, lineHeight: 19 },
-  card: { backgroundColor: "#fff", borderRadius: 14, padding: 16, marginBottom: 10, borderWidth: 1, borderColor: "#f1f5f9" },
-  cardAction: { borderColor: "#c7d2fe", backgroundColor: "#fcfcff" },
-  pressed: { opacity: 0.7 },
-  cardTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  cardTitle: { flex: 1, fontSize: 16, fontWeight: "700", color: "#0f172a", marginRight: 8 },
-  owner: { fontSize: 13, color: "#64748b", marginTop: 4 },
-  pillRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 10 },
-  pill: { borderRadius: 999, paddingVertical: 3, paddingHorizontal: 10 },
-  pillText: { color: "#fff", fontSize: 11, fontWeight: "700" },
-  actionPill: { borderRadius: 999, paddingVertical: 3, paddingHorizontal: 10, backgroundColor: "#6366f1" },
-  actionPillText: { color: "#fff", fontSize: 11, fontWeight: "700" },
+  screen: { flex: 1, backgroundColor: colors.canvas },
+  container: { padding: 20, paddingTop: 4, paddingBottom: 48 },
+  pressed: { opacity: 0.85, transform: [{ scale: 0.985 }] },
+  emptyCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderWidth: 1.5,
+    borderColor: colors.line,
+    borderStyle: "dashed",
+  },
+  card: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    padding: 14,
+    paddingLeft: 18,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: colors.hairline,
+    overflow: "hidden",
+    ...shadow.card,
+  },
+  cardAction: { borderColor: colors.indigoLine, backgroundColor: "#fbfbff" },
+  stripe: { position: "absolute", left: 0, top: 0, bottom: 0, width: 4 },
+  cardBody: { flex: 1, marginLeft: 14, marginRight: 8 },
+  cardTitle: { fontSize: 15.5, fontWeight: "800", color: colors.ink },
+  ownerRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 3 },
+  owner: { fontSize: 12.5, color: colors.muted, flexShrink: 1 },
+  pillRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 9 },
 });

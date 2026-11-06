@@ -4,3 +4,6 @@ dist/
 coverage/
 *.log
 .DS_Store
+
+# Sprint 6
+.env.test

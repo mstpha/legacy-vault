@@ -33,7 +33,7 @@ export default function NotificationBell({ navigation }) {
       style={styles.button}
       accessibilityLabel={unread > 0 ? `Notifications, ${unread} unread` : "Notifications"}
     >
-      <Ionicons name={unread > 0 ? "notifications" : "notifications-outline"} size={24} color="#0f172a" />
+      <Ionicons name={unread > 0 ? "notifications" : "notifications-outline"} size={21} color="#0f172a" />
       {unread > 0 && (
         <View style={styles.badge}>
           <Text style={styles.badgeText}>{unread > 99 ? "99+" : unread}</Text>
@@ -44,11 +44,20 @@ export default function NotificationBell({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-  button: { padding: 4 },
+  button: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: "#f1f5f9",
+    alignItems: "center",
+    justifyContent: "center",
+  },
   badge: {
     position: "absolute",
-    top: -2,
-    right: -4,
+    top: -3,
+    right: -3,
     minWidth: 18,
     height: 18,
     borderRadius: 9,

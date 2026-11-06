@@ -32,11 +32,9 @@ async function loadCapsuleContext(payload) {
 }
 
 async function deliverEmail(userId, type, payload) {
-  if (!process.env.MAILTRAP_API_KEY) {
-    logger.info("notification_created_no_email_configured", { userId, type });
-    return;
-  }
-
+  // Sprint 6 fix: this used to bail out unless MAILTRAP_API_KEY was set, a leftover from before the
+  // mailer moved to SMTP, so notification emails were never sent. sendEmail() itself already
+  // logs and returns { sent: false } when SMTP is not configured.
   const [user, ctx] = await Promise.all([
     prisma.user.findUnique({ where: { id: userId }, select: { email: true, fullName: true } }),
     loadCapsuleContext(payload),

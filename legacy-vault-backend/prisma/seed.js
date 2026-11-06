@@ -35,9 +35,14 @@ async function main() {
   console.log(`Seeded ${PERMISSIONS.length} role/permission pairs.`);
 }
 
-main()
-  .catch((err) => {
-    console.error(err);
-    process.exit(1);
-  })
-  .finally(() => prisma.$disconnect());
+module.exports = { PERMISSIONS };
+
+// Only seed when run directly (`npm run prisma:seed`), not when the e2e tests import PERMISSIONS.
+if (require.main === module) {
+  main()
+    .catch((err) => {
+      console.error(err);
+      process.exit(1);
+    })
+    .finally(() => prisma.$disconnect());
+}

@@ -1,6 +1,15 @@
 import React, { useState } from "react";
-import { View, Text, TextInput, Pressable, StyleSheet, Alert, ActivityIndicator } from "react-native";
+import { View, Text, StyleSheet, Alert } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../context/AuthContext";
+import { AuthLayout, Field, Button, LinkText, Divider } from "../components/ui";
+import { colors } from "../theme";
+
+const PROMISES = [
+  ["lock-closed", "Encrypted on your phone"],
+  ["people", "Released by guarantors"],
+  ["finger-print", "Opened with biometrics"],
+];
 
 export default function LoginScreen({ navigation }) {
   const { login } = useAuth();
@@ -17,13 +26,9 @@ export default function LoginScreen({ navigation }) {
       }
       // If MFA isn't required, isAuthenticated flips to true and RootNavigator
       // swaps to the app stack automatically — no manual navigation needed.
-
-
     } catch (err) {
       const status = err.response?.status;
       const data = err.response?.data;
-
-      console.log("Login failed:", status, data);
 
       const errorMessage =
         data?.error?.message ||
@@ -44,70 +49,75 @@ export default function LoginScreen({ navigation }) {
     } finally {
       setSubmitting(false);
     }
-
   };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Digital Legacy Vault</Text>
-      <Text style={styles.subtitle}>Sign in to your account</Text>
-
-      <TextInput
-        style={styles.input}
-        placeholder="Email"
+    <AuthLayout
+      icon="archive"
+      title="Welcome back"
+      subtitle="Sign in to manage what you leave behind."
+      footer={
+        <>
+          <LinkText prefix="New to the vault?" onPress={() => navigation.navigate("Register")}>
+            Create an account
+          </LinkText>
+          <Divider style={styles.divider} />
+          <View style={styles.promises}>
+            {PROMISES.map(([icon, label]) => (
+              <View key={label} style={styles.promise}>
+                <View style={styles.promiseIcon}>
+                  <Ionicons name={icon} size={16} color={colors.indigo} />
+                </View>
+                <Text style={styles.promiseText}>{label}</Text>
+              </View>
+            ))}
+          </View>
+        </>
+      }
+    >
+      <Field
+        label="Email"
+        icon="mail-outline"
+        placeholder="you@example.com"
         autoCapitalize="none"
         autoCorrect={false}
         keyboardType="email-address"
         value={email}
         onChangeText={setEmail}
       />
-      <TextInput
-        style={styles.input}
-        placeholder="Password"
+      <Field
+        label="Password"
+        icon="lock-closed-outline"
+        placeholder="Your password"
         secureTextEntry
         value={password}
         onChangeText={setPassword}
+        onSubmitEditing={() => email && password && onSubmit()}
       />
-
-      {submitting ? (
-        <ActivityIndicator style={styles.button} />
-      ) : (
-        <Pressable
-          style={[styles.button, (!email || !password) && styles.buttonDisabled]}
-          onPress={onSubmit}
-          disabled={!email || !password}
-        >
-          <Text style={styles.buttonText}>Log in</Text>
-        </Pressable>
-      )}
-
-      <Text style={styles.link} onPress={() => navigation.navigate("Register")}>
-        No account yet? Register
-      </Text>
-    </View>
+      <Button
+        title="Log in"
+        icon="arrow-forward"
+        onPress={onSubmit}
+        disabled={!email || !password}
+        loading={submitting}
+        style={styles.button}
+      />
+    </AuthLayout>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: "center", padding: 24, backgroundColor: "#fff" },
-  title: { fontSize: 26, fontWeight: "700", textAlign: "center" },
-  subtitle: { fontSize: 14, color: "#666", textAlign: "center", marginBottom: 28 },
-  input: {
-    borderWidth: 1,
-    borderColor: "#d1d5db",
-    borderRadius: 10,
-    padding: 14,
-    marginBottom: 12,
-    fontSize: 16,
-  },
-  button: {
-    backgroundColor: "#0f172a",
-    borderRadius: 10,
-    padding: 14,
+  button: { marginTop: 6 },
+  divider: { marginTop: 24, marginBottom: 18 },
+  promises: { flexDirection: "row", justifyContent: "space-between", gap: 8 },
+  promise: { flex: 1, alignItems: "center" },
+  promiseIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    backgroundColor: colors.indigoSoft,
     alignItems: "center",
-    marginTop: 8,
+    justifyContent: "center",
   },
-  buttonDisabled: { opacity: 0.5 },
-  buttonText: { color: "#fff", fontSize: 16, fontWeight: "600" },
-  link: { marginTop: 20, color: "#2563eb", textAlign: "center", fontSize: 14 },
+  promiseText: { fontSize: 11.5, color: colors.muted, textAlign: "center", marginTop: 6, lineHeight: 15, fontWeight: "600" },
 });

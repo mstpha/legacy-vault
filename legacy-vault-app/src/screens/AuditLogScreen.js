@@ -4,6 +4,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import { useAuth } from "../context/AuthContext";
 import { listAuditRequest, verifyAuditRequest } from "../api/audit.api";
+import { Banner, Button, EmptyState, Hero } from "../components/ui";
+import { colors, radius, shadow } from "../theme";
 
 // action -> [what a person reads, icon, colour family]
 const ACTIONS = {
@@ -51,12 +53,12 @@ const TONES = {
 };
 
 const FILTERS = [
-  { key: null, label: "All" },
-  { key: "accounts", label: "Accounts" },
-  { key: "capsules", label: "Capsules" },
-  { key: "lifecycle", label: "Alerts & unlock" },
-  { key: "access", label: "Access" },
-  { key: "security", label: "Security" },
+  { key: null, label: "All", icon: "albums-outline" },
+  { key: "accounts", label: "Accounts", icon: "person-outline" },
+  { key: "capsules", label: "Capsules", icon: "archive-outline" },
+  { key: "lifecycle", label: "Alerts & unlock", icon: "time-outline" },
+  { key: "access", label: "Access", icon: "eye-outline" },
+  { key: "security", label: "Security", icon: "shield-outline" },
 ];
 
 const describe = (action) => ACTIONS[action] || [action.replace(/_/g, " ").toLowerCase(), "document-text", "info"];
@@ -116,9 +118,7 @@ export default function AuditLogScreen() {
   if (user?.role !== "ADMIN") {
     return (
       <View style={styles.center}>
-        <Ionicons name="lock-closed" size={36} color="#cbd5e1" />
-        <Text style={styles.emptyTitle}>Admins only</Text>
-        <Text style={styles.emptyText}>The audit log can only be viewed by administrators.</Text>
+        <EmptyState icon="lock-closed" title="Admins only" text="The audit log can only be viewed by administrators." />
       </View>
     );
   }
@@ -155,50 +155,51 @@ export default function AuditLogScreen() {
     }
   };
 
+  const integrityBad = integrity && (integrity.error || !integrity.valid);
+
   const header = (
     <View>
-      <View style={styles.verifyRow}>
-        <Pressable style={[styles.verifyButton, verifying && styles.dim]} onPress={onVerify} disabled={verifying}>
-          {verifying ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="shield-checkmark" size={16} color="#fff" />}
-          <Text style={styles.verifyText}>Verify integrity</Text>
-        </Pressable>
-        <Text style={styles.verifyHint}>Re-computes the hash chain to prove no entry was changed or removed.</Text>
-      </View>
+      <Hero
+        icon="document-text"
+        eyebrow="Tamper-evident"
+        title="Audit log"
+        subtitle="Every sensitive action is chained by hash. Verifying re-computes the chain to prove nothing was changed or removed."
+      >
+        <Button title="Verify integrity" icon="shield-checkmark" variant="light" onPress={onVerify} loading={verifying} style={styles.verify} />
+      </Hero>
 
       {integrity && (
-        <View style={[styles.banner, integrity.error || !integrity.valid ? styles.bannerBad : styles.bannerGood]}>
-          <Ionicons
-            name={integrity.error || !integrity.valid ? "alert-circle" : "checkmark-circle"}
-            size={20}
-            color={integrity.error || !integrity.valid ? "#b91c1c" : "#15803d"}
-          />
-          <Text style={[styles.bannerText, { color: integrity.error || !integrity.valid ? "#b91c1c" : "#15803d" }]}>
-            {integrity.error
-              ? integrity.error
-              : integrity.valid
-              ? `Chain intact: ${integrity.checked} entries verified.${integrity.legacyUnchained ? ` ${integrity.legacyUnchained} older entries have no hash and weren't checked.` : ""}`
-              : `Chain BROKEN at entry #${integrity.brokenAt.seq}. ${integrity.brokenAt.reason}`}
-          </Text>
-        </View>
+        <Banner tone={integrityBad ? "danger" : "success"} title={integrityBad ? "Integrity problem" : "Chain intact"}>
+          {integrity.error
+            ? integrity.error
+            : integrity.valid
+            ? `${integrity.checked} entries verified.${integrity.legacyUnchained ? ` ${integrity.legacyUnchained} older entries have no hash and weren't checked.` : ""}`
+            : `Chain BROKEN at entry #${integrity.brokenAt.seq}. ${integrity.brokenAt.reason}`}
+        </Banner>
       )}
 
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
-        {FILTERS.map((f) => (
-          <Pressable key={f.label} style={[styles.chip, group === f.key && styles.chipActive]} onPress={() => setGroup(f.key)}>
-            <Text style={[styles.chipText, group === f.key && styles.chipTextActive]}>{f.label}</Text>
-          </Pressable>
-        ))}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips} style={styles.chipsScroll}>
+        {FILTERS.map((f) => {
+          const active = group === f.key;
+          return (
+            <Pressable key={f.label} style={[styles.chip, active && styles.chipActive]} onPress={() => setGroup(f.key)}>
+              <Ionicons name={f.icon} size={14} color={active ? "#fff" : colors.muted} />
+              <Text style={[styles.chipText, active && styles.chipTextActive]}>{f.label}</Text>
+            </Pressable>
+          );
+        })}
       </ScrollView>
 
       {capsule && (
         <Pressable style={styles.capsuleFilter} onPress={() => setCapsule(null)}>
+          <Ionicons name="funnel" size={14} color={colors.indigoInk} />
           <Text style={styles.capsuleFilterText} numberOfLines={1}>
             Capsule: {capsule.title || capsule.id}
           </Text>
-          <Ionicons name="close-circle" size={16} color="#4338ca" />
+          <Ionicons name="close-circle" size={18} color={colors.indigoInk} />
         </Pressable>
       )}
-      {error && <Text style={styles.error}>{error}</Text>}
+      {error && <Banner tone="danger">{error}</Banner>}
     </View>
   );
 
@@ -214,33 +215,43 @@ export default function AuditLogScreen() {
       onEndReachedThreshold={0.4}
       ListEmptyComponent={
         loading ? (
-          <ActivityIndicator style={{ marginTop: 40 }} />
-        ) : (
-          <Text style={styles.emptyText}>{error ? "" : "No entries match this filter."}</Text>
+          <ActivityIndicator color={colors.ink} style={{ marginTop: 40 }} />
+        ) : error ? null : (
+          <EmptyState icon="search" title="No entries" text="No entries match this filter." />
         )
       }
-      ListFooterComponent={loadingMore ? <ActivityIndicator style={{ marginVertical: 16 }} /> : <View style={{ height: 24 }} />}
-      renderItem={({ item }) => {
+      ListFooterComponent={loadingMore ? <ActivityIndicator color={colors.ink} style={{ marginVertical: 16 }} /> : <View style={{ height: 24 }} />}
+      renderItem={({ item, index }) => {
         const [label, icon, toneName] = describe(item.action);
         const tone = TONES[toneName] || TONES.info;
         const meta = metadataLine(item.metadata);
+        const isLast = index === entries.length - 1;
         return (
-          <View style={styles.card}>
-            <View style={[styles.iconBadge, { backgroundColor: tone.bg }]}>
-              <Ionicons name={icon} size={18} color={tone.fg} />
+          <View style={styles.timelineRow}>
+            {/* Left rail: icon dot + connecting line */}
+            <View style={styles.rail}>
+              <View style={[styles.railDot, { backgroundColor: tone.bg, borderColor: `${tone.fg}33` }]}>
+                <Ionicons name={icon} size={16} color={tone.fg} />
+              </View>
+              {!isLast && <View style={styles.railLine} />}
             </View>
-            <View style={styles.cardBody}>
+
+            <View style={styles.card}>
               <View style={styles.titleRow}>
                 <Text style={styles.title}>{label}</Text>
                 <Text style={styles.seq}>#{item.seq}</Text>
               </View>
-              <Text style={styles.who}>
-                {item.userEmail || (item.userId ? `Deleted user (${item.userId.slice(0, 8)})` : "System")}
-              </Text>
+              <View style={styles.whoRow}>
+                <Ionicons name="person-circle-outline" size={14} color={colors.faint} />
+                <Text style={styles.who} numberOfLines={1}>
+                  {item.userEmail || (item.userId ? `Deleted user (${item.userId.slice(0, 8)})` : "System")}
+                </Text>
+              </View>
               {item.capsuleId && (
-                <Pressable onPress={() => setCapsule({ id: item.capsuleId, title: item.capsuleTitle })}>
-                  <Text style={styles.capsuleLink} numberOfLines={1}>
-                    {item.capsuleTitle ? `Capsule: ${item.capsuleTitle}` : `Capsule ${item.capsuleId.slice(0, 8)} (deleted)`}
+                <Pressable onPress={() => setCapsule({ id: item.capsuleId, title: item.capsuleTitle })} style={styles.capsuleLink}>
+                  <Ionicons name="archive-outline" size={12} color={colors.indigo} />
+                  <Text style={styles.capsuleLinkText} numberOfLines={1}>
+                    {item.capsuleTitle || `${item.capsuleId.slice(0, 8)} (deleted)`}
                   </Text>
                 </Pressable>
               )}
@@ -262,39 +273,91 @@ export default function AuditLogScreen() {
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: "#f8fafc" },
-  container: { padding: 16 },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 32 },
-  emptyTitle: { fontSize: 17, fontWeight: "700", color: "#0f172a", marginTop: 12 },
-  emptyText: { fontSize: 13, color: "#94a3b8", textAlign: "center", marginTop: 8, lineHeight: 19 },
-  error: { color: "#b91c1c", fontSize: 13, marginBottom: 8 },
-  dim: { opacity: 0.6 },
-  verifyRow: { marginBottom: 12 },
-  verifyButton: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: "#0f172a", borderRadius: 10, paddingVertical: 12 },
-  verifyText: { color: "#fff", fontSize: 14, fontWeight: "600" },
-  verifyHint: { fontSize: 11.5, color: "#94a3b8", marginTop: 6, textAlign: "center" },
-  banner: { flexDirection: "row", gap: 8, alignItems: "flex-start", borderRadius: 10, padding: 12, marginBottom: 12 },
-  bannerGood: { backgroundColor: "#f0fdf4" },
-  bannerBad: { backgroundColor: "#fef2f2" },
-  bannerText: { flex: 1, fontSize: 13, lineHeight: 19, fontWeight: "600" },
-  chips: { gap: 8, paddingBottom: 12 },
-  chip: { borderWidth: 1, borderColor: "#d1d5db", borderRadius: 999, paddingVertical: 7, paddingHorizontal: 14, backgroundColor: "#fff" },
-  chipActive: { backgroundColor: "#0f172a", borderColor: "#0f172a" },
-  chipText: { fontSize: 13, color: "#374151" },
+  screen: { flex: 1, backgroundColor: colors.canvas },
+  container: { padding: 20, paddingTop: 4 },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 32, backgroundColor: colors.canvas },
+  verify: { marginTop: 18 },
+
+  chipsScroll: { marginHorizontal: -20, marginBottom: 6 },
+  chips: { gap: 8, paddingHorizontal: 20, paddingBottom: 10 },
+  chip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radius.pill,
+    paddingVertical: 8,
+    paddingHorizontal: 13,
+    backgroundColor: colors.surface,
+  },
+  chipActive: { backgroundColor: colors.ink, borderColor: colors.ink },
+  chipText: { fontSize: 13, color: colors.body, fontWeight: "700" },
   chipTextActive: { color: "#fff" },
-  capsuleFilter: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", backgroundColor: "#eef2ff", borderRadius: 10, padding: 10, marginBottom: 12 },
-  capsuleFilterText: { flex: 1, color: "#4338ca", fontSize: 13, fontWeight: "600", marginRight: 8 },
-  card: { flexDirection: "row", backgroundColor: "#fff", borderRadius: 12, padding: 12, marginBottom: 8, borderWidth: 1, borderColor: "#f1f5f9" },
-  iconBadge: { width: 36, height: 36, borderRadius: 10, alignItems: "center", justifyContent: "center" },
-  cardBody: { flex: 1, marginLeft: 10 },
+  capsuleFilter: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: colors.indigoSoft,
+    borderWidth: 1,
+    borderColor: colors.indigoLine,
+    borderRadius: radius.md,
+    padding: 10,
+    marginBottom: 12,
+  },
+  capsuleFilterText: { flex: 1, color: colors.indigoInk, fontSize: 13, fontWeight: "700" },
+
+  timelineRow: { flexDirection: "row" },
+  rail: { width: 38, alignItems: "center" },
+  railDot: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 8,
+  },
+  railLine: { flex: 1, width: 2, backgroundColor: colors.line, marginTop: 4, marginBottom: -8 },
+  card: {
+    flex: 1,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    padding: 14,
+    marginLeft: 10,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: colors.hairline,
+    ...shadow.card,
+  },
   titleRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  title: { flex: 1, fontSize: 14, fontWeight: "700", color: "#0f172a" },
-  seq: { fontSize: 11, color: "#cbd5e1", marginLeft: 8 },
-  who: { fontSize: 12.5, color: "#475569", marginTop: 2 },
-  capsuleLink: { fontSize: 12.5, color: "#6366f1", marginTop: 2 },
-  meta: { fontSize: 11.5, color: "#94a3b8", marginTop: 3 },
-  footerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 6 },
-  time: { fontSize: 11, color: "#94a3b8" },
-  legacy: { backgroundColor: "#f1f5f9", borderRadius: 999, paddingVertical: 2, paddingHorizontal: 8 },
-  legacyText: { fontSize: 10, color: "#64748b", fontWeight: "600" },
+  title: { flex: 1, fontSize: 14.5, fontWeight: "800", color: colors.ink },
+  seq: {
+    fontSize: 11,
+    color: colors.muted,
+    fontWeight: "700",
+    backgroundColor: colors.hairline,
+    borderRadius: radius.pill,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    marginLeft: 8,
+    overflow: "hidden",
+  },
+  whoRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 },
+  who: { fontSize: 12.5, color: colors.body, flexShrink: 1 },
+  capsuleLink: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4, alignSelf: "flex-start" },
+  capsuleLinkText: { fontSize: 12.5, color: colors.indigo, fontWeight: "700" },
+  meta: {
+    fontSize: 11.5,
+    color: colors.muted,
+    marginTop: 8,
+    backgroundColor: colors.canvas,
+    borderRadius: radius.sm,
+    padding: 8,
+    fontFamily: "monospace",
+  },
+  footerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 8 },
+  time: { fontSize: 11, color: colors.faint, fontWeight: "600" },
+  legacy: { backgroundColor: colors.hairline, borderRadius: radius.pill, paddingVertical: 2, paddingHorizontal: 8 },
+  legacyText: { fontSize: 10, color: colors.muted, fontWeight: "700" },
 });

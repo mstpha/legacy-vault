@@ -1,12 +1,14 @@
 import React, { useCallback, useState } from "react";
-import { View, Text, Switch, StyleSheet, ActivityIndicator, Alert, SectionList } from "react-native";
+import { View, Text, Switch, StyleSheet, ActivityIndicator, Alert, ScrollView } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import { listPermissionsRequest, setPermissionRequest } from "../api/permissions.api";
+import { Banner, IconBadge, EmptyState, Loading, Hero, HeroStats, ProgressBar } from "../components/ui";
+import { colors, radius, shadow } from "../theme";
 
-const ROLE_LABELS = {
-  TESTATOR: "Testator",
-  GUARANTOR: "Guarantor",
-  BENEFICIARY: "Beneficiary",
+const ROLES = {
+  TESTATOR: { label: "Testator", icon: "archive", color: colors.ink },
+  GUARANTOR: { label: "Guarantor", icon: "shield-checkmark", color: colors.indigo },
+  BENEFICIARY: { label: "Beneficiary", icon: "gift", color: colors.sky },
 };
 
 export default function PermissionsScreen() {
@@ -54,83 +56,104 @@ export default function PermissionsScreen() {
     }
   };
 
-  if (loading) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" />
-      </View>
-    );
-  }
+  if (loading) return <Loading />;
 
   if (forbidden || !matrix) {
     return (
       <View style={styles.center}>
-        <Text style={styles.forbiddenText}>Admin access required to view this page.</Text>
+        <EmptyState icon="lock-closed" title="Admins only" text="Admin access required to view this page." />
       </View>
     );
   }
 
-  const sections = Object.keys(matrix).map((role) => ({
-    title: ROLE_LABELS[role] || role,
-    role,
-    data: matrix[role],
-  }));
-
   return (
-    <SectionList
-      contentContainerStyle={styles.container}
-      sections={sections}
-      keyExtractor={(item) => `${item.role}:${item.permission}`}
-      renderSectionHeader={({ section }) => <Text style={styles.sectionHeader}>{section.title}</Text>}
-      renderItem={({ item, section }) => {
-        const key = `${section.role}:${item.permission}`;
+    <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
+      <Hero
+        icon="key"
+        eyebrow="Administration"
+        title="Roles & permissions"
+        subtitle="Switching a permission off blocks that action immediately for every user with that role. It's enforced on the server, not just hidden in the app."
+      >
+        <HeroStats
+          items={Object.keys(matrix).map((role) => ({
+            value: `${matrix[role].filter((p) => p.enabled).length}/${matrix[role].length}`,
+            label: (ROLES[role] || { label: role }).label,
+          }))}
+        />
+      </Hero>
+
+      {Object.keys(matrix).map((role) => {
+        const meta = ROLES[role] || { label: role, icon: "person", color: colors.muted };
+        const items = matrix[role];
+        const enabledCount = items.filter((p) => p.enabled).length;
         return (
-          <View style={styles.row}>
-            <View style={styles.rowText}>
-              <Text style={styles.rowLabel}>{item.label}</Text>
-              <Text style={styles.rowKey}>{item.permission}</Text>
+          <View key={role} style={styles.group}>
+            <View style={styles.groupHead}>
+              <IconBadge name={meta.icon} color={meta.color} size={34} iconSize={17} />
+              <Text style={styles.groupTitle}>{meta.label}</Text>
+              <Text style={styles.groupCount}>
+                {enabledCount}/{items.length} on
+              </Text>
             </View>
-            {pendingKey === key ? (
-              <ActivityIndicator />
-            ) : (
-              <Switch value={item.enabled} onValueChange={(v) => onToggle(section.role, item.permission, v)} />
-            )}
+            <ProgressBar value={enabledCount / Math.max(1, items.length)} color={meta.color} style={styles.groupBar} />
+            <View style={styles.card}>
+              {items.map((item, i) => {
+                const key = `${role}:${item.permission}`;
+                return (
+                  <View key={key} style={[styles.row, i === items.length - 1 && styles.rowLast]}>
+                    <View style={styles.rowText}>
+                      <Text style={[styles.rowLabel, !item.enabled && styles.rowLabelOff]}>{item.label}</Text>
+                      <Text style={styles.rowKey}>{item.permission}</Text>
+                    </View>
+                    {pendingKey === key ? (
+                      <ActivityIndicator color={colors.ink} />
+                    ) : (
+                      <Switch
+                        value={item.enabled}
+                        onValueChange={(v) => onToggle(role, item.permission, v)}
+                        trackColor={{ false: colors.line, true: colors.green }}
+                        thumbColor="#fff"
+                      />
+                    )}
+                  </View>
+                );
+              })}
+            </View>
           </View>
         );
-      }}
-      ListHeaderComponent={
-        <Text style={styles.intro}>
-          Turning a permission off blocks that action immediately, for every user holding that role — it's
-          enforced server-side, not just hidden in the app.
-        </Text>
-      }
-    />
+      })}
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24 },
-  forbiddenText: { color: "#666", fontSize: 14, textAlign: "center" },
-  container: { padding: 20, paddingBottom: 48 },
-  intro: { fontSize: 13, color: "#666", marginBottom: 16, lineHeight: 18 },
-  sectionHeader: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#374151",
-    textTransform: "uppercase",
-    marginTop: 20,
-    marginBottom: 8,
+  screen: { flex: 1, backgroundColor: colors.canvas },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24, backgroundColor: colors.canvas },
+  container: { padding: 20, paddingTop: 4, paddingBottom: 48 },
+  groupBar: { marginBottom: 12 },
+  group: { marginTop: 18 },
+  groupHead: { flexDirection: "row", alignItems: "center", marginBottom: 12 },
+  groupTitle: { flex: 1, fontSize: 16.5, fontWeight: "800", color: colors.ink, marginLeft: 12 },
+  groupCount: { fontSize: 12, fontWeight: "700", color: colors.faint },
+  card: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.hairline,
+    paddingHorizontal: 16,
+    ...shadow.card,
   },
   row: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    backgroundColor: "#f3f4f6",
-    borderRadius: 10,
-    padding: 14,
-    marginBottom: 8,
+    paddingVertical: 13,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.hairline,
   },
+  rowLast: { borderBottomWidth: 0 },
   rowText: { flex: 1, paddingRight: 12 },
-  rowLabel: { fontSize: 14, fontWeight: "600" },
-  rowKey: { fontSize: 11, color: "#999", marginTop: 2, fontFamily: "monospace" },
+  rowLabel: { fontSize: 14, fontWeight: "600", color: colors.ink },
+  rowLabelOff: { color: colors.faint },
+  rowKey: { fontSize: 11, color: colors.faint, marginTop: 2, fontFamily: "monospace" },
 });

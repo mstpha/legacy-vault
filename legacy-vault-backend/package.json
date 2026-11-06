@@ -1,7 +1,7 @@
 {
   "name": "legacy-vault-backend",
   "version": "0.1.0",
-  "description": "Digital Legacy Vault - Backend API (Sprint 1: Foundations & Authentication)",
+  "description": "Digital Legacy Vault - Backend API (Sprints 1-6)",
   "main": "src/server.js",
   "type": "commonjs",
   "scripts": {
@@ -11,7 +11,12 @@
     "prisma:migrate": "prisma migrate dev --name init",
     "prisma:seed": "node prisma/seed.js",
     "prisma:studio": "prisma studio",
-    "test": "jest --runInBand"
+    "test": "jest --runInBand",
+    "test:unit": "jest --selectProjects unit",
+    "test:e2e": "jest --runInBand --selectProjects e2e",
+    "sweep:once": "node time-db.js",
+    "load:sweep": "node tests/load/sweep-load.js",
+    "load:http": "node tests/load/http-load.js"
   },
   "prisma": {
     "seed": "node prisma/seed.js"
@@ -20,7 +25,7 @@
     "@prisma/client": "^5.19.1",
     "@sentry/node": "^7.120.3",
     "@supabase/supabase-js": "^2.45.4",
-    "bcrypt": "^5.1.1",
+    "bcrypt": "^6.0.0",
     "bullmq": "^5.12.12",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
@@ -37,9 +42,34 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "autocannon": "^7.15.0",
     "jest": "^29.7.0",
     "nodemon": "^3.1.4",
     "prisma": "^5.19.1",
     "supertest": "^7.0.0"
+  },
+  "jest": {
+    "projects": [
+      {
+        "displayName": "unit",
+        "testEnvironment": "node",
+        "testMatch": [
+          "<rootDir>/tests/unit/**/*.test.js"
+        ]
+      },
+      {
+        "displayName": "e2e",
+        "testEnvironment": "node",
+        "testMatch": [
+          "<rootDir>/tests/e2e/**/*.test.js"
+        ],
+        "setupFiles": [
+          "<rootDir>/tests/setup/env.js"
+        ],
+        "setupFilesAfterEnv": [
+          "<rootDir>/tests/setup/mocks.js"
+        ]
+      }
+    ]
   }
 }

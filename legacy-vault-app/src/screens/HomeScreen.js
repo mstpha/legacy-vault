@@ -2,9 +2,13 @@ import React, { useCallback, useState } from "react";
 import { View, Text, Pressable, StyleSheet, ScrollView } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../context/AuthContext";
 import { listCapsulesRequest } from "../api/capsule.api";
 import { getSecuritySummary } from "../utils/deviceKeys";
+import NotificationBell from "../components/NotificationBell";
+import { Avatar, Banner, Card, CountBadge, Hero, HeroStats, IconBadge, ListItem, Pill, ProgressBar, SectionLabel } from "../components/ui";
+import { colors, radius, shadow } from "../theme";
 
 function getGreeting() {
   const hour = new Date().getHours();
@@ -13,21 +17,15 @@ function getGreeting() {
   return "Good evening";
 }
 
-function getInitials(name, email) {
-  const source = name?.trim() || email || "?";
-  const parts = source.split(" ").filter(Boolean);
-  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
-  return source.slice(0, 2).toUpperCase();
-}
-
 export default function HomeScreen({ navigation }) {
   const { user, logout } = useAuth();
+  const insets = useSafeAreaInsets();
   const isAdmin = user?.role === "ADMIN";
   const mfaEnabled = !!user?.mfaEnabled;
 
-  // How many capsules are waiting on this user as guarantor / beneficiary (shown as badges).
-  const [waiting, setWaiting] = useState({ guarantor: 0, beneficiary: 0 });
-  // App lock + device key status for the "Device security" card.
+  // Counts for the vault summary and the portal badges.
+  const [waiting, setWaiting] = useState({ mine: null, alerts: 0, guarantor: 0, beneficiary: 0 });
+  // App lock + device key status for the security checklist.
   const [security, setSecurity] = useState(null);
 
   useFocusEffect(
@@ -51,248 +49,277 @@ export default function HomeScreen({ navigation }) {
         .then((data) => {
           if (!active) return;
           setWaiting({
+            mine: data.asTestator.length,
+            alerts: data.asTestator.filter((c) => c.state === "INACTIVITY_ALERT").length,
             guarantor: data.asGuarantor.filter((c) => c.state === "PENDING_VALIDATION").length,
             beneficiary: data.asBeneficiary.filter((c) => c.state === "UNLOCKED").length,
           });
         })
-        .catch(() => {}); // badges are a nicety: never bother the user if this fails
+        .catch(() => {}); // counts are a nicety: never bother the user if this fails
       return () => {
         active = false;
       };
     }, [])
   );
 
+  const checks = [
+    {
+      done: mfaEnabled,
+      icon: "shield-checkmark",
+      title: "Two-factor authentication",
+      subtitle: mfaEnabled ? "Enabled" : "Not enabled, tap to set up",
+      onPress: () => navigation.navigate(mfaEnabled ? "MfaDisable" : "MfaSetup"),
+    },
+    {
+      done: !!security?.lockEnabled,
+      icon: "finger-print",
+      title: "App lock",
+      subtitle: security?.lockEnabled ? "Fingerprint / face / PIN on" : "Off",
+      onPress: () => navigation.navigate("SecuritySettings"),
+    },
+    {
+      done: !!security?.keyActive,
+      icon: "key",
+      title: "Device key",
+      subtitle: security?.keyActive ? "Active on this phone" : "Not set up",
+      onPress: () => navigation.navigate("SecuritySettings"),
+    },
+  ];
+  const score = checks.filter((c) => c.done).length;
+  const firstName = user?.fullName?.trim().split(" ")[0];
+
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
-      {/* --- Profile header --- */}
-      <View style={styles.header}>
-        <View style={styles.avatar}>
-          <Text style={styles.avatarText}>{getInitials(user?.fullName, user?.email)}</Text>
-        </View>
-        <View style={styles.headerText}>
-          <Text style={styles.greeting}>
-            {getGreeting()}
-            {user?.fullName ? `, ${user.fullName.split(" ")[0]}` : ""}
+    <ScrollView style={styles.screen} contentContainerStyle={[styles.container, { paddingTop: insets.top + 14 }]}>
+      {/* --- Top bar --- */}
+      <View style={styles.topBar}>
+        <Avatar label={user?.fullName || user?.email} size={48} dark />
+        <View style={styles.topText}>
+          <Text style={styles.greeting}>{getGreeting()}</Text>
+          <Text style={styles.name} numberOfLines={1}>
+            {firstName || user?.email}
           </Text>
-          <Text style={styles.email}>{user?.email}</Text>
         </View>
         {isAdmin && (
           <View style={styles.adminPill}>
-            <Ionicons name="shield-checkmark" size={12} color="#9333ea" />
-            <Text style={styles.adminPillText}>Admin</Text>
+            <Pill label="Admin" icon="shield-checkmark" color={colors.violetInk} />
           </View>
         )}
+        <NotificationBell navigation={navigation} />
       </View>
 
-      {/* --- Capsules: the primary action, gets the biggest/boldest card --- */}
-      <Pressable
-        style={({ pressed }) => [styles.heroCard, pressed && styles.cardPressed]}
+      {waiting.alerts > 0 && (
+        <Banner tone="warning" icon="time" title="Are you still there?" onPress={() => navigation.navigate("CapsuleList")}>
+          {`${waiting.alerts} capsule${waiting.alerts > 1 ? "s are" : " is"} waiting for you to confirm you're active.`}
+        </Banner>
+      )}
+
+      {/* --- Vault: the primary destination --- */}
+      <Hero
+        icon="archive"
+        eyebrow="Your vault"
+        title="My Capsules"
+        subtitle="Create, manage, and monitor what you're leaving behind."
+        right={
+          <View style={styles.heroArrow}>
+            <Ionicons name="arrow-forward" size={18} color="#fff" />
+          </View>
+        }
         onPress={() => navigation.navigate("CapsuleList")}
       >
-        <View style={[styles.iconBadge, styles.iconBadgeIndigo]}>
-          <Ionicons name="archive" size={22} color="#fff" />
-        </View>
-        <View style={styles.cardBody}>
-          <Text style={styles.heroTitle}>My Capsules</Text>
-          <Text style={styles.heroSubtitle}>Create, manage, and monitor what you're leaving behind</Text>
-        </View>
-        <Ionicons name="chevron-forward" size={20} color="#c7d2fe" />
-      </Pressable>
+        <HeroStats
+          items={[
+            { value: waiting.mine ?? "–", label: "Capsules" },
+            { value: waiting.guarantor, label: "To validate" },
+            { value: waiting.beneficiary, label: "Ready to open" },
+          ]}
+        />
+      </Hero>
 
       {/* --- Portals: capsules where someone else named you --- */}
-      <Text style={styles.sectionLabel}>Portals</Text>
-      <Pressable
-        style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
-        onPress={() => navigation.navigate("GuarantorPortal")}
-      >
-        <View style={[styles.iconBadge, styles.iconBadgeViolet]}>
-          <Ionicons name="shield-checkmark" size={20} color="#fff" />
-        </View>
-        <View style={styles.cardBody}>
-          <Text style={styles.cardTitle}>Guarantor portal</Text>
-          <Text style={styles.cardSubtitle}>Capsules where you're a guarantor, and their status</Text>
-        </View>
-        {waiting.guarantor > 0 && (
-          <View style={styles.countBadge}>
-            <Text style={styles.countBadgeText}>{waiting.guarantor}</Text>
-          </View>
-        )}
-        <Ionicons name="chevron-forward" size={18} color="#d1d5db" />
-      </Pressable>
+      <SectionLabel>Portals</SectionLabel>
+      <View style={styles.grid}>
+        <PortalTile
+          icon="shield-checkmark"
+          color={colors.indigo}
+          title="Guarantor"
+          subtitle="Capsules you help protect"
+          count={waiting.guarantor}
+          onPress={() => navigation.navigate("GuarantorPortal")}
+        />
+        <PortalTile
+          icon="gift"
+          color={colors.sky}
+          title="Beneficiary"
+          subtitle="Capsules left to you"
+          count={waiting.beneficiary}
+          onPress={() => navigation.navigate("BeneficiaryPortal")}
+        />
+      </View>
 
-      <Pressable
-        style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
-        onPress={() => navigation.navigate("BeneficiaryPortal")}
-      >
-        <View style={[styles.iconBadge, styles.iconBadgeSky]}>
-          <Ionicons name="gift" size={20} color="#fff" />
-        </View>
-        <View style={styles.cardBody}>
-          <Text style={styles.cardTitle}>Beneficiary portal</Text>
-          <Text style={styles.cardSubtitle}>Capsules left to you, readable once unlocked</Text>
-        </View>
-        {waiting.beneficiary > 0 && (
-          <View style={styles.countBadge}>
-            <Text style={styles.countBadgeText}>{waiting.beneficiary}</Text>
-          </View>
-        )}
-        <Ionicons name="chevron-forward" size={18} color="#d1d5db" />
-      </Pressable>
-
-      {/* --- Security / MFA: status-aware card, color reflects state --- */}
-      <Text style={styles.sectionLabel}>Account</Text>
-      <Pressable
-        style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
-        onPress={() => navigation.navigate(mfaEnabled ? "MfaDisable" : "MfaSetup")}
-      >
-        <View style={[styles.iconBadge, mfaEnabled ? styles.iconBadgeGreen : styles.iconBadgeAmber]}>
-          <Ionicons name={mfaEnabled ? "shield-checkmark" : "shield-outline"} size={20} color="#fff" />
-        </View>
-        <View style={styles.cardBody}>
-          <Text style={styles.cardTitle}>Two-Factor Authentication</Text>
-          <View style={styles.statusRow}>
-            <View style={[styles.statusDot, mfaEnabled ? styles.statusDotGreen : styles.statusDotAmber]} />
-            <Text style={styles.cardSubtitle}>{mfaEnabled ? "Enabled" : "Not enabled — tap to set up"}</Text>
+      {/* --- Security checklist --- */}
+      <SectionLabel right={<Text style={styles.scoreText}>{score}/3 on</Text>}>Security</SectionLabel>
+      <Card style={styles.securityCard}>
+        <View style={styles.scoreRow}>
+          <IconBadge
+            name={score === 3 ? "shield-checkmark" : "shield-half"}
+            color={score === 3 ? colors.green : colors.amber}
+            soft
+            size={44}
+            iconSize={22}
+          />
+          <View style={styles.scoreBody}>
+            <Text style={styles.scoreTitle}>{score === 3 ? "Fully protected" : "Strengthen your account"}</Text>
+            <Text style={styles.scoreSubtitle}>
+              {score === 3 ? "Every protection is switched on." : `${3 - score} protection${3 - score > 1 ? "s" : ""} left to turn on.`}
+            </Text>
           </View>
         </View>
-        <Ionicons name="chevron-forward" size={18} color="#d1d5db" />
-      </Pressable>
-
-      {/* --- Device security: phone biometric lock + device key --- */}
-      <Pressable
-        style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
-        onPress={() => navigation.navigate("SecuritySettings")}
-      >
-        <View style={[styles.iconBadge, security?.lockEnabled && security?.keyActive ? styles.iconBadgeGreen : styles.iconBadgeTeal]}>
-          <Ionicons name="finger-print" size={22} color="#fff" />
-        </View>
-        <View style={styles.cardBody}>
-          <Text style={styles.cardTitle}>Device security</Text>
-          <Text style={styles.cardSubtitle}>
-            {security
-              ? `App lock ${security.lockEnabled ? "on" : "off"} · Device key ${security.keyActive ? "active" : "not set up"}`
-              : "Fingerprint / face lock and device key"}
-          </Text>
-        </View>
-        <Ionicons name="chevron-forward" size={18} color="#d1d5db" />
-      </Pressable>
+        <ProgressBar value={score / 3} color={score === 3 ? colors.green : colors.amber} style={styles.scoreBar} />
+        {checks.map((c, i) => (
+          <Pressable
+            key={c.title}
+            onPress={c.onPress}
+            style={({ pressed }) => [styles.checkRow, i === checks.length - 1 && styles.checkRowLast, pressed && styles.pressed]}
+          >
+            <View style={[styles.checkDot, c.done ? styles.checkDotDone : styles.checkDotTodo]}>
+              <Ionicons name={c.done ? "checkmark" : c.icon} size={c.done ? 14 : 13} color={c.done ? "#fff" : colors.amber} />
+            </View>
+            <View style={styles.checkBody}>
+              <Text style={styles.checkTitle}>{c.title}</Text>
+              <Text style={[styles.checkSubtitle, !c.done && styles.checkSubtitleTodo]}>{c.subtitle}</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color={colors.ghost} />
+          </Pressable>
+        ))}
+      </Card>
 
       {/* --- Admin: only rendered at all for admins, distinct purple treatment --- */}
       {isAdmin && (
         <>
-          <Text style={styles.sectionLabel}>Administration</Text>
-          <Pressable
-            style={({ pressed }) => [styles.card, styles.adminCard, pressed && styles.cardPressed]}
+          <SectionLabel>Administration</SectionLabel>
+          <ListItem
+            icon="key"
+            color={colors.violet}
+            tone="admin"
+            title="Roles & Permissions"
+            subtitle="Control what testators, guarantors & beneficiaries can do"
             onPress={() => navigation.navigate("Permissions")}
-          >
-            <View style={[styles.iconBadge, styles.iconBadgePurple]}>
-              <Ionicons name="key" size={20} color="#fff" />
-            </View>
-            <View style={styles.cardBody}>
-              <Text style={styles.cardTitle}>Roles & Permissions</Text>
-              <Text style={styles.cardSubtitle}>Control what testators, guarantors & beneficiaries can do</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color="#d1d5db" />
-          </Pressable>
-
-          <Pressable
-            style={({ pressed }) => [styles.card, styles.adminCard, pressed && styles.cardPressed]}
+          />
+          <ListItem
+            icon="document-text"
+            color={colors.violet}
+            tone="admin"
+            title="Audit log"
+            subtitle="Tamper-evident history of every sensitive action"
             onPress={() => navigation.navigate("AuditLog")}
-          >
-            <View style={[styles.iconBadge, styles.iconBadgePurple]}>
-              <Ionicons name="document-text" size={20} color="#fff" />
-            </View>
-            <View style={styles.cardBody}>
-              <Text style={styles.cardTitle}>Audit log</Text>
-              <Text style={styles.cardSubtitle}>Tamper-evident history of every sensitive action</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color="#d1d5db" />
-          </Pressable>
+          />
         </>
       )}
 
-      {/* --- Sign out: deliberately understated, not a card --- */}
-      <Pressable style={styles.logoutRow} onPress={logout}>
-        <Ionicons name="log-out-outline" size={18} color="#ef4444" />
+      {/* --- Sign out: deliberately understated --- */}
+      <Pressable style={({ pressed }) => [styles.logoutRow, pressed && styles.pressed]} onPress={logout}>
+        <Ionicons name="log-out-outline" size={18} color={colors.red} />
         <Text style={styles.logoutText}>Log out</Text>
       </Pressable>
 
-      <Text style={styles.footnote}>Digital Legacy Vault</Text>
+      <View style={styles.footer}>
+        <Ionicons name="lock-closed" size={11} color={colors.ghost} />
+        <Text style={styles.footnote}>Digital Legacy Vault · end-to-end encrypted</Text>
+      </View>
     </ScrollView>
   );
 }
 
+function PortalTile({ icon, color, title, subtitle, count, onPress }) {
+  return (
+    <Pressable onPress={onPress} style={({ pressed }) => [styles.tile, pressed && styles.pressed]}>
+      <View style={styles.tileTop}>
+        <IconBadge name={icon} color={color} size={42} iconSize={21} />
+        <CountBadge count={count} />
+      </View>
+      <Text style={styles.tileTitle}>{title}</Text>
+      <Text style={styles.tileSubtitle}>{subtitle}</Text>
+      <View style={styles.tileLink}>
+        <Text style={[styles.tileLinkText, { color }]}>Open</Text>
+        <Ionicons name="arrow-forward" size={13} color={color} />
+      </View>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: "#f8fafc" },
-  container: { padding: 20, paddingBottom: 48 },
+  screen: { flex: 1, backgroundColor: colors.canvas },
+  container: { padding: 20, paddingBottom: 40 },
+  pressed: { opacity: 0.8, transform: [{ scale: 0.985 }] },
 
-  header: { flexDirection: "row", alignItems: "center", marginBottom: 28, marginTop: 8 },
-  avatar: { width: 52, height: 52, borderRadius: 26, backgroundColor: "#0f172a", alignItems: "center", justifyContent: "center", marginRight: 14 },
-  avatarText: { color: "#fff", fontSize: 18, fontWeight: "700" },
-  headerText: { flex: 1 },
-  greeting: { fontSize: 19, fontWeight: "700", color: "#0f172a" },
-  email: { fontSize: 13, color: "#64748b", marginTop: 2 },
-  adminPill: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "#f3e8ff", borderRadius: 999, paddingVertical: 4, paddingHorizontal: 10 },
-  adminPillText: { fontSize: 11, fontWeight: "700", color: "#9333ea" },
+  topBar: { flexDirection: "row", alignItems: "center", marginBottom: 22 },
+  topText: { flex: 1, marginLeft: 12, marginRight: 8 },
+  greeting: { fontSize: 13, color: colors.muted, fontWeight: "600" },
+  name: { fontSize: 21, fontWeight: "800", color: colors.ink, letterSpacing: -0.3, marginTop: 1 },
+  adminPill: { marginRight: 10 },
 
-  sectionLabel: { fontSize: 12, fontWeight: "700", color: "#94a3b8", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 10, marginTop: 8 },
-
-  heroCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#0f172a",
+  heroArrow: {
+    width: 36,
+    height: 36,
     borderRadius: 18,
-    padding: 18,
-    marginBottom: 28,
-    shadowColor: "#0f172a",
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.2,
-    shadowRadius: 16,
-    elevation: 4,
+    backgroundColor: "rgba(255,255,255,0.12)",
+    alignItems: "center",
+    justifyContent: "center",
   },
-  heroTitle: { fontSize: 17, fontWeight: "700", color: "#fff" },
-  heroSubtitle: { fontSize: 13, color: "#cbd5e1", marginTop: 3, lineHeight: 18 },
 
-  card: {
+  grid: { flexDirection: "row", gap: 12 },
+  tile: {
+    flex: 1,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: colors.hairline,
+    ...shadow.card,
+  },
+  tileTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" },
+  tileTitle: { fontSize: 15.5, fontWeight: "800", color: colors.ink, marginTop: 14 },
+  tileSubtitle: { fontSize: 12.5, color: colors.muted, marginTop: 3, lineHeight: 17, minHeight: 34 },
+  tileLink: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 10 },
+  tileLinkText: { fontSize: 13, fontWeight: "800" },
+
+  scoreText: { fontSize: 12, fontWeight: "800", color: colors.faint },
+  securityCard: { paddingBottom: 6 },
+  scoreRow: { flexDirection: "row", alignItems: "center" },
+  scoreBody: { flex: 1, marginLeft: 14 },
+  scoreTitle: { fontSize: 16, fontWeight: "800", color: colors.ink },
+  scoreSubtitle: { fontSize: 12.5, color: colors.muted, marginTop: 2 },
+  scoreBar: { marginTop: 14, marginBottom: 6 },
+  checkRow: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#fff",
-    borderRadius: 14,
-    padding: 16,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: "#f1f5f9",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 6,
-    elevation: 1,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.hairline,
   },
-  adminCard: { borderColor: "#f3e8ff", backgroundColor: "#fdfaff" },
-  cardPressed: { opacity: 0.7 },
-  cardBody: { flex: 1, marginLeft: 14, marginRight: 8 },
-  cardTitle: { fontSize: 15, fontWeight: "600", color: "#0f172a" },
-  cardSubtitle: { fontSize: 12.5, color: "#64748b", marginTop: 2 },
+  checkRowLast: { borderBottomWidth: 0 },
+  checkDot: { width: 26, height: 26, borderRadius: 13, alignItems: "center", justifyContent: "center" },
+  checkDotDone: { backgroundColor: colors.green },
+  checkDotTodo: { backgroundColor: colors.amberSoft, borderWidth: 1, borderColor: "#fde68a" },
+  checkBody: { flex: 1, marginLeft: 12 },
+  checkTitle: { fontSize: 14, fontWeight: "700", color: colors.ink },
+  checkSubtitle: { fontSize: 12, color: colors.muted, marginTop: 1 },
+  checkSubtitleTodo: { color: "#b45309" },
 
-  iconBadge: { width: 40, height: 40, borderRadius: 12, alignItems: "center", justifyContent: "center" },
-  iconBadgeIndigo: { backgroundColor: "rgba(255,255,255,0.12)" },
-  iconBadgeGreen: { backgroundColor: "#22c55e" },
-  iconBadgeAmber: { backgroundColor: "#f59e0b" },
-  iconBadgePurple: { backgroundColor: "#a855f7" },
-  iconBadgeViolet: { backgroundColor: "#6366f1" },
-  iconBadgeSky: { backgroundColor: "#0ea5e9" },
-  iconBadgeTeal: { backgroundColor: "#14b8a6" },
+  logoutRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    marginTop: 20,
+    paddingVertical: 14,
+    borderRadius: radius.md,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.hairline,
+  },
+  logoutText: { color: colors.red, fontSize: 14.5, fontWeight: "700" },
 
-  countBadge: { minWidth: 22, height: 22, borderRadius: 11, paddingHorizontal: 6, backgroundColor: "#ef4444", alignItems: "center", justifyContent: "center", marginRight: 8 },
-  countBadgeText: { color: "#fff", fontSize: 12, fontWeight: "700" },
-
-  statusRow: { flexDirection: "row", alignItems: "center", marginTop: 3 },
-  statusDot: { width: 6, height: 6, borderRadius: 3, marginRight: 6 },
-  statusDotGreen: { backgroundColor: "#22c55e" },
-  statusDotAmber: { backgroundColor: "#f59e0b" },
-
-  logoutRow: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, marginTop: 24, paddingVertical: 10 },
-  logoutText: { color: "#ef4444", fontSize: 14, fontWeight: "600" },
-
-  footnote: { textAlign: "center", fontSize: 11, color: "#cbd5e1", marginTop: 20 },
+  footer: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, marginTop: 20 },
+  footnote: { fontSize: 11, color: colors.ghost, fontWeight: "600" },
 });

@@ -4,6 +4,9 @@ const logger = require("./logger");
 
 let transporter = null;
 
+// Counts emails requested during this process.
+let testEmailCount = 0;
+
 function getMailClient() {
   if (transporter) return transporter;
 
@@ -17,10 +20,7 @@ function getMailClient() {
     host: process.env.SMTP_HOST || "smtp.gmail.com",
     port: Number(process.env.SMTP_PORT || 587),
     secure: process.env.SMTP_SECURE === "true",
-    auth: {
-      user,
-      pass,
-    },
+    auth: { user, pass },
   });
 
   return transporter;
@@ -36,7 +36,26 @@ async function sendEmail({
   const recipients = (Array.isArray(to) ? to : [to]).filter(Boolean);
 
   if (recipients.length === 0) {
-    return { sent: false };
+    return { sent: false, counted: false };
+  }
+
+  // TEST MODE: count emails without sending them.
+  if (process.env.EMAIL_TEST_MODE === "true") {
+    testEmailCount += recipients.length;
+
+    logger.info("email_counted_test_mode", {
+      subject,
+      recipientCount: recipients.length,
+      totalCount: testEmailCount,
+      category,
+    });
+
+    return {
+      sent: false,
+      counted: true,
+      count: recipients.length,
+      totalCount: testEmailCount,
+    };
   }
 
   const mailClient = getMailClient();
@@ -47,7 +66,7 @@ async function sendEmail({
       recipientCount: recipients.length,
     });
 
-    return { sent: false };
+    return { sent: false, counted: false };
   }
 
   const fromEmail = process.env.MAIL_FROM_EMAIL?.trim();
@@ -59,7 +78,7 @@ async function sendEmail({
       message: "MAIL_FROM_EMAIL is not configured",
     });
 
-    return { sent: false };
+    return { sent: false, counted: false };
   }
 
   try {
@@ -95,4 +114,17 @@ async function sendEmail({
   }
 }
 
-module.exports = { sendEmail };
+// Useful for tests and diagnostics.
+function getEmailTestCount() {
+  return testEmailCount;
+}
+
+function resetEmailTestCount() {
+  testEmailCount = 0;
+}
+
+module.exports = {
+  sendEmail,
+  getEmailTestCount,
+  resetEmailTestCount,
+};

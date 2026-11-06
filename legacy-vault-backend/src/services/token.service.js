@@ -59,12 +59,19 @@ async function rotateRefreshToken(rawToken, meta = {}) {
   const newRaw = generateOpaqueToken();
   const expiresAt = new Date(Date.now() + refreshTtlMs());
 
-  await prisma.$transaction([
-    prisma.refreshToken.update({
-      where: { id: existing.id },
+  // Sprint 6 fix: claim the old token with a conditional UPDATE inside the transaction. Before,
+  // two parallel /refresh calls with the same token could both pass the check above and fork the session.
+  await prisma.$transaction(async (tx) => {
+    const { count } = await tx.refreshToken.updateMany({
+      where: { id: existing.id, revokedAt: null },
       data: { revokedAt: new Date(), replacedByToken: hashToken(newRaw) },
-    }),
-    prisma.refreshToken.create({
+    });
+    if (count !== 1) {
+      const err = new Error("Invalid or expired refresh token");
+      err.statusCode = 401;
+      throw err;
+    }
+    await tx.refreshToken.create({
       data: {
         userId: existing.userId,
         tokenHash: hashToken(newRaw),
@@ -72,8 +79,8 @@ async function rotateRefreshToken(rawToken, meta = {}) {
         createdByIp: meta.ip,
         userAgent: meta.userAgent,
       },
-    }),
-  ]);
+    });
+  });
 
   return { userId: existing.userId, newRawToken: newRaw };
 }
