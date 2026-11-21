@@ -1,27 +1,28 @@
-# Render deployment: primary and HA backup
+# Render free demo: primary and backup APIs
 
-The root [render.yaml](../render.yaml) defines the primary API, backup API, HA
-sync worker, and shared Render Key Value (Redis) service. It does not create or
-use Render PostgreSQL databases: PostgreSQL and file storage both remain on
-Supabase.
+The root [render.yaml](../render.yaml) defines the primary API, backup API,
+and shared Render Key Value (Redis) service. It does not create or use Render
+PostgreSQL databases: PostgreSQL and file storage both remain on Supabase.
+This Blueprint is configured for a **free demo**, not dependable production
+availability.
 
 ## Before deploying
 
 1. Create or keep **two Supabase projects**, A and B. A is the primary
-    PostgreSQL database and B is the standby; both projects also provide the
-    Supabase Storage buckets used by the app and replication worker. Keep the
-    projects in the same region when possible.
-2. Plan on paid, continuously running web/worker services. Render's free
-   services can sleep, which is not suitable for a continuously running sync
-    worker or dependable failover. The backup's pre-deploy migration also
-    requires a paid service plan.
+   PostgreSQL database and B is the standby; both projects also provide the
+   Supabase Storage buckets used by the app and sync logic. Keep the projects
+   in the same region when possible.
+2. The two Render APIs and Key Value are on free plans. Free web services sleep
+    after 15 minutes without inbound traffic and may take about a minute to
+    wake. Free Key Value can lose its data when restarted. There is no separate
+    HA sync worker in this demo Blueprint.
 3. Create the private `capsule-files` bucket in both Supabase projects. The
     service-role keys are server-side only; never put them in the mobile app.
-4. The Blueprint creates one Render Key Value service for Redis, shared by
-    both API services.
+4. The Blueprint creates one free Render Key Value service for Redis, shared
+    by both API services. Its queue data is not durable.
 5. Push this repository, including `render.yaml`, to the Git branch you will
    deploy from. In Render, choose **New → Blueprint**, select that repository
-    and branch, and apply the Blueprint. The Blueprint currently places Render
+   and branch, and apply the Blueprint. The Blueprint currently places Render
     services in Frankfurt; change their `region` in `render.yaml` if another
     available Render region is closer to your Supabase projects.
 
@@ -42,23 +43,23 @@ for migrations.
 | --- | --- |
 | `legacy-vault-backend` | `DATABASE_URL` = A's transaction-pooler URL |
 | `legacy-vault-backend-backup` | `DATABASE_URL` = A's transaction-pooler URL; `DIRECT_URL` = A's direct/session-pooler URL; `B_DATABASE_URL` = B's transaction-pooler URL; `B_DIRECT_URL` = B's direct/session-pooler URL |
-| `legacy-vault-ha-sync-worker` | `DATABASE_URL` = A's transaction-pooler URL; `B_DATABASE_URL` = B's transaction-pooler URL |
 
-The backup pre-deploy initializer uses `DIRECT_URL` and `B_DIRECT_URL` for
-migrations and HA SQL setup. The APIs and sync worker use the pooled URLs.
+The backup service's startup initializer uses `DIRECT_URL` and `B_DIRECT_URL`
+for migrations and HA SQL setup. Since free services don't support a
+pre-deploy command, this initializer runs whenever the backup service starts.
+The APIs use the pooled URLs.
 
 Set these Supabase values on the indicated services:
 
 | Render service | Variables |
 | --- | --- |
 | Primary | `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` for Storage project A |
-| Backup and sync worker | `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` for A, plus `B_SUPABASE_URL` and `B_SUPABASE_SERVICE_ROLE_KEY` for B |
+| Backup | `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` for A, plus `B_SUPABASE_URL` and `B_SUPABASE_SERVICE_ROLE_KEY` for B |
 
 Set the same `REDIS_URL` (Render Key Value's internal connection string) on
 the primary and backup services. Generate two distinct random JWT secrets and
 set the same `JWT_ACCESS_SECRET` and `JWT_REFRESH_SECRET` on both web services.
-The sync worker does not need Redis or JWT secrets. Do not send secret values
-in chat or commit them to the repository.
+Do not send secret values in chat or commit them to the repository.
 
 Generate each JWT secret locally (run the command twice) and paste the results
 directly into both Render web services:
@@ -76,40 +77,39 @@ them on the primary and backup alike if the app sends email or reports errors.
 - Builds each Node service from its own package lockfile and generates Prisma
   Client.
 - Starts the primary API and backup API as separate Render web services.
-- Runs the backup pre-deploy initializer. It applies the checked-in Prisma
+- Runs the backup startup initializer. It applies the checked-in Prisma
   migrations to Supabase A and B, installs the HA schema on each database,
-  assigns the node identities, and installs the B-only audit-chain rule. The
-  SQL setup is idempotent and can run on subsequent backup deploys.
-- Runs the change-log replication/sync-check process as a separate background
-  worker.
+  assigns the node identities, and installs the B-only audit-chain rule.
 - Uses `/health/live` as Render's process-level health check. This endpoint
   intentionally stays available when a database is down; use the public
   `/health` endpoint to monitor database/failover status.
 
 The primary remains the normal app URL. The backup web service has its own
-public URL; the sync worker does not have a public HTTP URL.
+public URL. Both can sleep on the free plan.
 
 ## First deployment and verification
 
-1. Wait for the backup service's pre-deploy step to finish successfully. If
-   Prisma fails, verify the A/B Supabase URLs, direct/session-pooler
-   connectivity, and that A and B are distinct projects.
+1. Wait for the backup service to start successfully. Its logs should show the
+   database migrations and HA trigger setup completing. If Prisma fails,
+   verify the A/B Supabase URLs, direct/session-pooler connectivity, and that A
+   and B are distinct projects.
 2. If A already has application rows, run a one-time sync-check after both
-   Storage buckets exist. From the backup service's Shell, run
-   `cd legacy-vault-backend-backup && npm run sync:check`; this reconciles data
-   and copies referenced file objects from the side that has them. For
-   brand-new empty databases, this is not needed.
+   Storage buckets exist. Free Render services don't provide Shell access, so
+   run `npm run sync:check` locally from `legacy-vault-backend-backup` with
+   that folder's `.env` configured for both Supabase projects. For brand-new
+   empty databases, this is not needed.
 3. Check `https://<primary-service>.onrender.com/health` and
-   `https://<backup-service>.onrender.com/health`. Primary should return
-   `status: "ok"` and backup should report `state: "A_ACTIVE"` with
-   `outboxPending: 0` once the HA worker has caught up.
-4. Check the sync worker's Render logs for `sync_worker_started` and
-   `sync_applied` / scheduled sync-check messages. Send a write through the
-   primary, then confirm the backup reports no pending A-to-B changes.
+   `https://<backup-service>.onrender.com/health`. Both should report a healthy
+   database when Supabase A is reachable. A healthy response does not mean B
+   is synchronized in this free demo.
+4. **Demo limitation:** there is no continuous A-to-B sync worker. Writes
+   made on A are not continuously copied to B. The backup normally shares A
+   and can handle a primary-process failure while A is reachable; if A fails,
+   the backup may switch to a stale B. Do not use this deployment for real
+   vault data or treat it as reliable database failover.
 5. In `legacy-vault-app/.env`, set `EXPO_PUBLIC_PRIMARY_API_URL` and
    `EXPO_PUBLIC_BACKUP_API_URL` to the two Render web-service URLs with `/api`
-   appended (for example, `https://primary.onrender.com/api`). Keep the backup
-   URL in the app/client configuration; do not point app traffic at the worker.
+   appended (for example, `https://primary.onrender.com/api`).
 
 ## Values to send me after creating the databases
 
@@ -128,10 +128,10 @@ Redis credentials, SMTP passwords, or JWT secrets here. Enter those directly
 in Render's Environment dashboard. If you already created Render Postgres
 databases, they are not used by this setup.
 
-## Important HA limitations
+## Free-plan limitations
 
-This design is asynchronous replication, not synchronous multi-region HA.
-Writes can lag by the worker interval, and Render service or Supabase outages
-can affect availability. Keep Supabase A and B in the same region when
-possible, monitor `/health` and worker logs, and retain independent database
-backups. Failover testing should use a staging deployment before production.
+Render free web services sleep after 15 minutes idle, cold starts take time,
+and the free Redis-compatible service is not durable. There is no background
+sync worker in this demo setup, so B can be stale. Render also applies monthly
+free-instance-hour and usage limits. This is for testing only; use a paid
+always-on worker and persistent Redis before storing real vault data.

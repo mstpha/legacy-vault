@@ -3,8 +3,8 @@ services:
     name: legacy-vault-backend
     runtime: node
     region: frankfurt
-    plan: 0.5c-512mb
-    buildCommand: cd legacy-vault-backend && npm ci && npx prisma generate
+    plan: free
+    buildCommand: cd legacy-vault-backend && npm ci --include=dev && npx prisma generate
     startCommand: cd legacy-vault-backend && node src/server.js
     healthCheckPath: /health/live
     envVars:
@@ -29,10 +29,9 @@ services:
     name: legacy-vault-backend-backup
     runtime: node
     region: frankfurt
-    plan: 0.5c-512mb
-    buildCommand: cd legacy-vault-backend-backup && npm ci && npx prisma generate
-    preDeployCommand: cd legacy-vault-backend-backup && node scripts/prepare-render.js
-    startCommand: cd legacy-vault-backend-backup && node src/server.js
+    plan: free
+    buildCommand: cd legacy-vault-backend-backup && npm ci --include=dev && npx prisma generate
+    startCommand: cd legacy-vault-backend-backup && node scripts/prepare-render.js && node src/server.js
     healthCheckPath: /health/live
     envVars:
       - key: NODE_ENV
@@ -62,32 +61,9 @@ services:
       - key: JWT_REFRESH_SECRET
         sync: false
 
-  - type: worker
-    name: legacy-vault-ha-sync-worker
-    runtime: node
-    region: frankfurt
-    plan: 0.5c-512mb
-    buildCommand: cd legacy-vault-backend-backup && npm ci && npx prisma generate
-    startCommand: cd legacy-vault-backend-backup && npm run sync:worker
-    envVars:
-      - key: NODE_ENV
-        value: production
-      - key: DATABASE_URL
-        sync: false
-      - key: B_DATABASE_URL
-        sync: false
-      - key: SUPABASE_URL
-        sync: false
-      - key: SUPABASE_SERVICE_ROLE_KEY
-        sync: false
-      - key: B_SUPABASE_URL
-        sync: false
-      - key: B_SUPABASE_SERVICE_ROLE_KEY
-        sync: false
-
   - type: keyvalue
     name: legacy-vault-redis
     region: frankfurt
+    plan: free
     maxmemoryPolicy: noeviction
-    persistenceMode: journal-snapshot
     ipAllowList: []
