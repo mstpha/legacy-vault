@@ -21,9 +21,12 @@ const { requestHandler: sentryRequestHandler, errorHandler: sentryErrorHandler }
 
 // Behind a reverse proxy / PaaS (Render, Railway, Fly, nginx...) req.ip is the proxy's address unless
 // this is set, which makes every user share ONE rate-limit bucket. Set TRUST_PROXY=1 in production.
-if (process.env.TRUST_PROXY) {
-  const v = process.env.TRUST_PROXY;
-  app.set("trust proxy", /^\d+$/.test(v) ? Number(v) : v === "true" ? true : v);
+if (process.env.TRUST_PROXY !== undefined) {
+  const v = process.env.TRUST_PROXY.trim().toLowerCase();
+  app.set(
+    "trust proxy",
+    v === "true" ? true : v === "false" ? false : /^\d+$/.test(v) ? Number(v) : v
+  );
 }
 
 app.use(sentryRequestHandler);

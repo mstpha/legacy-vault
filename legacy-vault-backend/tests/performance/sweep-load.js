@@ -1,7 +1,7 @@
 // Load test of the inactivity engine (monitoring.service) against a DISPOSABLE database.
 //
-//   node tests/load/sweep-load.js                 # 2 000 capsules (default)
-//   CAPSULES=20000 npm run load:sweep             # 20 000 capsules
+//   $env:ALLOW_SWEEP_TESTS='YES'; npm run load:sweep                 # 2 000 capsules (default)
+//   $env:CAPSULES=20000; $env:ALLOW_SWEEP_TESTS='YES'; npm run load:sweep
 //   BASELINE=1 npm run load:sweep                 # also time the pre-Sprint-6 algorithm for comparison
 //
 // What it measures
@@ -13,10 +13,17 @@
 const path = require("path");
 const crypto = require("crypto");
 require("dotenv").config({ path: path.join(__dirname, "../../.env.test") });
+const { isDisposableTestDatabase } = require("../helpers/testDatabase");
 
 const url = process.env.TEST_DATABASE_URL;
-if (!url || !/test/i.test(url)) {
-  console.error('TEST_DATABASE_URL must be set and contain "test". Refusing to run: this script inserts thousands of rows.');
+if (!isDisposableTestDatabase(url)) {
+  console.error(
+    "TEST_DATABASE_URL must name a test database or include application_name=legacy_vault_test. Refusing to run: this script inserts thousands of rows."
+  );
+  process.exit(2);
+}
+if (process.env.ALLOW_SWEEP_TESTS !== "YES") {
+  console.error('Refusing to write load-test data without ALLOW_SWEEP_TESTS=YES.');
   process.exit(2);
 }
 process.env.DATABASE_URL = url;

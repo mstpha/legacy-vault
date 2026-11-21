@@ -142,11 +142,18 @@ curl -X POST http://localhost:4000/api/auth/logout \
 
 ## 8. Run the tests
 
-Point `DATABASE_URL`/`DIRECT_URL` at a disposable test database (a second free Supabase project works well), migrate it, then:
+The default test suite is isolated from external services and needs no database:
 
 ```bash
 npm test
+npm run test:unit
+npm run test:api
+npm run test:security
 ```
+
+For bounded performance tests against a disposable test database and dedicated
+test account, see [tests/README.md](./tests/README.md). Load tests require an
+explicit PowerShell opt-in and should never target development or production.
 
 ## 9. Wire up Sentry (optional but recommended before Sprint 2)
 
@@ -154,15 +161,13 @@ npm test
 2. Copy its DSN into `SENTRY_DSN` in `.env`.
 3. Restart the server. Trigger a test error (e.g. hit `/api/auth/login` with a malformed body enough times, or temporarily throw in a route) and confirm it shows up in the Sentry dashboard.
 
-## What's deliberately *not* built yet
+## Current feature scope
 
-- Capsule CRUD, encryption, Supabase Storage, RLS policies → Sprint 2
-- BullMQ/Redis inactivity scheduler → Sprint 3
-- Guarantor portal & validation voting → Sprint 4
-- Beneficiary read access, audit hash-chaining, full RBAC/RLS → Sprint 5
-- Load tests, `/health` deep checks, security audit → Sprint 6
-
-The `Capsule`, `CapsuleGuarantor`, `CapsuleBeneficiary`, `Validation`, `AuditLog`, and `Notification` tables already exist in the DB per the Sprint 1 "complete modeling" requirement, but no routes touch them yet — that starts in Sprint 2.
+The original sprint descriptions are historical. The current backend includes
+authentication and MFA, capsule lifecycle routes, encrypted-file storage,
+guarantor/beneficiary access, device-key sharing, notifications, permissions,
+audit logging, health checks, and inactivity processing. Its isolated unit/API
+tests run without external services; load tests are documented separately.
 
 ## Project structure
 
@@ -193,7 +198,10 @@ legacy-vault-backend/
 │   ├── app.js
 │   └── server.js
 ├── tests/
-│   └── auth.test.js
+│   ├── api/                   # Express security and rate-limit tests
+│   ├── unit/                  # Credential, schema, audit, and middleware tests
+│   ├── performance/           # Explicitly opted-in HTTP and sweep load tests
+│   └── README.md
 ├── .env.example
 └── package.json
 ```

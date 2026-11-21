@@ -13,7 +13,16 @@
 -- =====================================================================================
 
 create schema if not exists ha;
-revoke all on schema ha from public, anon, authenticated;
+revoke all on schema ha from public;
+do $$
+declare role_name text;
+begin
+  foreach role_name in array array['anon', 'authenticated'] loop
+    if exists (select 1 from pg_roles where rolname = role_name) then
+      execute format('revoke all on schema ha from %I', role_name);
+    end if;
+  end loop;
+end $$;
 
 -- ---- Node identity -------------------------------------------------------------------
 create table if not exists ha.settings (
@@ -221,8 +230,18 @@ end $$;
 create or replace function ha.row_hash(p_row jsonb) returns text
 language sql immutable as $$ select md5(p_row::text) $$;
 
-revoke all on all functions in schema ha from public, anon, authenticated;
-revoke all on all tables    in schema ha from public, anon, authenticated;
+revoke all on all functions in schema ha from public;
+revoke all on all tables    in schema ha from public;
+do $$
+declare role_name text;
+begin
+  foreach role_name in array array['anon', 'authenticated'] loop
+    if exists (select 1 from pg_roles where rolname = role_name) then
+      execute format('revoke all on all functions in schema ha from %I', role_name);
+      execute format('revoke all on all tables in schema ha from %I', role_name);
+    end if;
+  end loop;
+end $$;
 
 -- ---- Install the capture trigger on every synced table --------------------------------------
 -- The sync set. _prisma_migrations is deliberately excluded (schema is migrated on both sides).

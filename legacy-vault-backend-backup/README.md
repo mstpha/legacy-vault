@@ -161,6 +161,10 @@ Point `DATABASE_URL`/`DIRECT_URL` at a disposable test database (a second free S
 npm test
 ```
 
+For plain-English reports, `npm run test:report` runs only database-free unit
+tests; `npm run test:report:e2e` runs the database-backed end-to-end project and
+requires a disposable `.env.test` database. See [tests/README.md](./tests/README.md).
+
 ## 9. Wire up Sentry (optional but recommended before Sprint 2)
 
 1. Create a free project at sentry.io (Node/Express platform).

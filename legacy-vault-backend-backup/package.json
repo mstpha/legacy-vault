@@ -12,6 +12,8 @@
     "prisma:seed": "node prisma/seed.js",
     "prisma:studio": "prisma studio",
     "test": "jest --runInBand",
+    "test:report": "jest --runInBand --selectProjects unit --reporters=./tests/simple-reporter.js",
+    "test:report:e2e": "jest --runInBand --selectProjects e2e --reporters=./tests/simple-reporter.js",
     "test:unit": "jest --selectProjects unit",
     "test:e2e": "jest --runInBand --selectProjects e2e",
     "sweep:once": "node time-db.js",

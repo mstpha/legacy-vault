@@ -1,9 +1,8 @@
-# Digital Legacy Vault — Mobile App (Sprint 1: Auth only)
+# Digital Legacy Vault — Mobile App
 
-A React Native (Expo) app that implements exactly the backend functionality that
-exists so far: register, login, TOTP MFA enrollment + verification, session
-persistence with auto-refreshing tokens, and logout. No capsule/guarantor/
-beneficiary screens yet — those show up as the backend grows in later sprints.
+A React Native (Expo) app for the Digital Legacy Vault, including authentication,
+MFA, encrypted capsules, device keys, biometric protection, and primary/backup API
+failover.
 
 ## Prerequisites
 
@@ -59,11 +58,42 @@ This opens the Expo dev tools in your terminal/browser:
 4. **Log out and log back in** — this time, after entering your password, you're sent to a "Verify code" screen asking for the current 6-digit code from your authenticator app.
 5. **Kill and reopen the app** — you should land straight on Home without logging in again: the refresh token (stored via `expo-secure-store`) silently re-establishes the session on launch.
 
+## 5. Run the tests
+
+The app unit tests exercise API retry/failover behavior, client-side encryption,
+sealed device keys, and secure token storage with native APIs mocked:
+
+```bash
+npm test
+```
+
+For the plain-English suite-by-suite report (including the crypto benchmark):
+
+```bash
+npm run test:report
+```
+
+`npm test` keeps the standard Jest output available.
+
+For coverage details, isolated security tests, and performance thresholds, see
+[tests/README.md](./tests/README.md). Run only the secure-storage and cryptography
+checks with `npm run test:security`.
+
+Run the crypto performance benchmark separately:
+
+```bash
+npm run test:performance
+```
+
+It reports encryption and decryption latency for a 512 KiB payload. Node timings
+are a repeatable regression signal, not a substitute for profiling a release build
+on the target Android/iOS device.
+
 ## How the pieces fit together
 
 - **`src/config.js`** — the one place that knows your backend's URL.
 - **`src/utils/storage.js`** — wraps `expo-secure-store` so tokens are stored in the device's secure keychain/keystore, never in plain JS state that survives a reload.
-- **`src/api/client.js`** — a single axios instance. A request interceptor attaches the current access token; a response interceptor catches `401`s, silently calls `/auth/refresh` once, retries the original request, and — if that also fails — logs the session out.
+- **`src/api/client.js`** — a single axios-based client. It attaches access tokens, refreshes once after `401`, and performs idempotent retries and primary/backup failover for transient errors.
 - **`src/api/auth.api.js`** — one function per backend endpoint (`/auth/register`, `/login`, `/refresh`, `/logout`, `/me`, `/mfa/setup`, `/mfa/confirm`).
 - **`src/context/AuthContext.js`** — the only piece of app state that matters this sprint: current user, whether a session is loading/authenticated, and the login/MFA/logout actions. On launch it tries to resume a session from the stored refresh token before rendering any screen.
 - **`src/navigation/RootNavigator.js`** — the entire "am I logged in" branch: shows `AuthNavigator` (Login/Register/MfaVerify) or `AppNavigator` (Home/MfaSetup) based on `isAuthenticated`, with a spinner while the session bootstrap runs.
@@ -102,9 +132,5 @@ legacy-vault-app/
 │       └── storage.js            # expo-secure-store wrapper
 ```
 
-## What's deliberately not here yet
-
-Capsule creation, guarantor/beneficiary screens, notifications, and everything
-past Sprint 1 in the backlog. This app grows alongside the backend — once
-Sprint 2 (capsule CRUD + encryption) is built, its screens get added here the
-same way.
+The sprint descriptions above are historical; current screens and utilities are
+listed under `src/screens/` and `src/utils/`.

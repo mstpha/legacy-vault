@@ -1,6 +1,8 @@
 # Legacy Vault: high availability setup
 
 Two backends, two Supabase projects, one sync worker. Everything runs locally on separate ports.
+For deploying the primary, backup, and sync worker on Render, see
+[RENDER_DEPLOYMENT.md](./RENDER_DEPLOYMENT.md).
 
 ```
                         GET /health every 5 s (both)

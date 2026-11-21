@@ -12,11 +12,13 @@
     "prisma:seed": "node prisma/seed.js",
     "prisma:studio": "prisma studio",
     "test": "jest --runInBand",
-    "test:unit": "jest --selectProjects unit",
-    "test:e2e": "jest --runInBand --selectProjects e2e",
+    "test:report": "jest --runInBand --reporters=./tests/simple-reporter.js",
+    "test:unit": "jest --runInBand --selectProjects unit",
+    "test:api": "jest --runInBand --selectProjects api",
+    "test:security": "jest --runInBand tests/unit/security-primitives.test.js tests/unit/token-service.test.js tests/unit/error-handler.test.js tests/unit/idempotency.test.js tests/api/security.test.js tests/api/rate-limits.test.js",
     "sweep:once": "node time-db.js",
-    "load:sweep": "node tests/load/sweep-load.js",
-    "load:http": "node tests/load/http-load.js"
+    "load:sweep": "node tests/performance/sweep-load.js",
+    "load:http": "node tests/performance/http-load.js"
   },
   "prisma": {
     "seed": "node prisma/seed.js"
@@ -58,16 +60,10 @@
         ]
       },
       {
-        "displayName": "e2e",
+        "displayName": "api",
         "testEnvironment": "node",
         "testMatch": [
-          "<rootDir>/tests/e2e/**/*.test.js"
-        ],
-        "setupFiles": [
-          "<rootDir>/tests/setup/env.js"
-        ],
-        "setupFilesAfterEnv": [
-          "<rootDir>/tests/setup/mocks.js"
+          "<rootDir>/tests/api/**/*.test.js"
         ]
       }
     ]

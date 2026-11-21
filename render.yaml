@@ -1,0 +1,93 @@
+services:
+  - type: web
+    name: legacy-vault-backend
+    runtime: node
+    region: frankfurt
+    plan: 0.5c-512mb
+    buildCommand: cd legacy-vault-backend && npm ci && npx prisma generate
+    startCommand: cd legacy-vault-backend && node src/server.js
+    healthCheckPath: /health/live
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: SERVER_ROLE
+        value: primary
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: JWT_ACCESS_SECRET
+        sync: false
+      - key: JWT_REFRESH_SECRET
+        sync: false
+
+  - type: web
+    name: legacy-vault-backend-backup
+    runtime: node
+    region: frankfurt
+    plan: 0.5c-512mb
+    buildCommand: cd legacy-vault-backend-backup && npm ci && npx prisma generate
+    preDeployCommand: cd legacy-vault-backend-backup && node scripts/prepare-render.js
+    startCommand: cd legacy-vault-backend-backup && node src/server.js
+    healthCheckPath: /health/live
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: SERVER_ROLE
+        value: backup
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_URL
+        sync: false
+      - key: B_DATABASE_URL
+        sync: false
+      - key: B_DIRECT_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: B_SUPABASE_URL
+        sync: false
+      - key: B_SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: JWT_ACCESS_SECRET
+        sync: false
+      - key: JWT_REFRESH_SECRET
+        sync: false
+
+  - type: worker
+    name: legacy-vault-ha-sync-worker
+    runtime: node
+    region: frankfurt
+    plan: 0.5c-512mb
+    buildCommand: cd legacy-vault-backend-backup && npm ci && npx prisma generate
+    startCommand: cd legacy-vault-backend-backup && npm run sync:worker
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: B_DATABASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: B_SUPABASE_URL
+        sync: false
+      - key: B_SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+
+  - type: keyvalue
+    name: legacy-vault-redis
+    region: frankfurt
+    maxmemoryPolicy: noeviction
+    persistenceMode: journal-snapshot
+    ipAllowList: []
