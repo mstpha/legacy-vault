@@ -56,10 +56,11 @@ Set these Supabase values on the indicated services:
 | Primary | `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` for Storage project A |
 | Backup | `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` for A, plus `B_SUPABASE_URL` and `B_SUPABASE_SERVICE_ROLE_KEY` for B |
 
-Set the same `REDIS_URL` (Render Key Value's internal connection string) on
-the primary and backup services. Generate two distinct random JWT secrets and
-set the same `JWT_ACCESS_SECRET` and `JWT_REFRESH_SECRET` on both web services.
-Do not send secret values in chat or commit them to the repository.
+The Blueprint automatically sets `REDIS_URL` on both API services to the
+internal connection string for `legacy-vault-redis`. Generate two distinct
+random JWT secrets and set the same `JWT_ACCESS_SECRET` and
+`JWT_REFRESH_SECRET` on both web services. Do not send secret values in chat
+or commit them to the repository.
 
 Generate each JWT secret locally (run the command twice) and paste the results
 directly into both Render web services:
