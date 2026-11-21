@@ -41,6 +41,10 @@ services:
         value: production
       - key: SERVER_ROLE
         value: backup
+      - key: HA_SYNC_WORKER_EMBEDDED
+        value: "true"
+      - key: SYNC_WORKER_STATUS_URL
+        value: http://127.0.0.1:4100/status
       - key: DATABASE_URL
         sync: false
       - key: DIRECT_URL

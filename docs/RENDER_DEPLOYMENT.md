@@ -1,8 +1,9 @@
 # Render free demo: primary and backup APIs
 
 The root [render.yaml](../render.yaml) defines the primary API, backup API,
-and shared Render Key Value (Redis) service. It does not create or use Render
-PostgreSQL databases: PostgreSQL and file storage both remain on Supabase.
+an embedded sync worker in the backup service, and shared Render Key Value
+(Redis). It does not create or use Render PostgreSQL databases: PostgreSQL and
+file storage both remain on Supabase.
 This Blueprint is configured for a **free demo**, not dependable production
 availability.
 
@@ -14,8 +15,8 @@ availability.
    in the same region when possible.
 2. The two Render APIs and Key Value are on free plans. Free web services sleep
     after 15 minutes without inbound traffic and may take about a minute to
-    wake. Free Key Value can lose its data when restarted. There is no separate
-    HA sync worker in this demo Blueprint.
+    wake. Free Key Value can lose its data when restarted. The sync worker runs
+    inside the backup service rather than as a separate Render worker.
 3. Create the private `capsule-files` bucket in both Supabase projects. The
     service-role keys are server-side only; never put them in the mobile app.
 4. The Blueprint creates one free Render Key Value service for Redis, shared
@@ -81,6 +82,8 @@ them on the primary and backup alike if the app sends email or reports errors.
 - Runs the backup startup initializer. It applies the checked-in Prisma
   migrations to Supabase A and B, installs the HA schema on each database,
   assigns the node identities, and installs the B-only audit-chain rule.
+- Starts the sync worker as a child process inside the backup web service.
+  Worker output appears in the backup service's Render logs.
 - Uses `/health/live` as Render's process-level health check. This endpoint
   intentionally stays available when a database is down; use the public
   `/health` endpoint to monitor database/failover status.
@@ -103,11 +106,12 @@ public URL. Both can sleep on the free plan.
    `https://<backup-service>.onrender.com/health`. Both should report a healthy
    database when Supabase A is reachable. A healthy response does not mean B
    is synchronized in this free demo.
-4. **Demo limitation:** there is no continuous A-to-B sync worker. Writes
-   made on A are not continuously copied to B. The backup normally shares A
-   and can handle a primary-process failure while A is reachable; if A fails,
-   the backup may switch to a stale B. Do not use this deployment for real
-   vault data or treat it as reliable database failover.
+4. Confirm the backup logs contain `sync_worker_started`. While the backup
+   service is awake, the worker copies changes between A and B. **Demo
+   limitation:** when Render sleeps or restarts the backup service, syncing
+   pauses, so B can be stale. If A fails, the backup may switch to stale B.
+   Do not use this deployment for real vault data or treat it as reliable
+   database failover.
 5. In `legacy-vault-app/.env`, set `EXPO_PUBLIC_PRIMARY_API_URL` and
    `EXPO_PUBLIC_BACKUP_API_URL` to the two Render web-service URLs with `/api`
    appended (for example, `https://primary.onrender.com/api`).
@@ -132,7 +136,8 @@ databases, they are not used by this setup.
 ## Free-plan limitations
 
 Render free web services sleep after 15 minutes idle, cold starts take time,
-and the free Redis-compatible service is not durable. There is no background
-sync worker in this demo setup, so B can be stale. Render also applies monthly
+and the free Redis-compatible service is not durable. The sync worker is a
+child of the backup service, so it sleeps and restarts with that service;
+replication is best-effort and B can be stale. Render also applies monthly
 free-instance-hour and usage limits. This is for testing only; use a paid
 always-on worker and persistent Redis before storing real vault data.

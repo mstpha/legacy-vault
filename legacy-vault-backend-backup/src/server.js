@@ -1,12 +1,14 @@
 const app = require("./app");
 const logger = require("./config/logger");
 const dbRouter = require("./ha/dbRouter");
+const { startEmbeddedSyncWorker } = require("./ha/embeddedSyncWorker");
 const { scheduleRepeatingJob, startWorker } = require("./jobs/inactivityWorker");
 
 const PORT = process.env.PORT || 4001;
 
 let server;
 let inactivityWorker;
+let stopEmbeddedSyncWorker;
 
 // DRAINING -> A_ACTIVE: reconcile A and B right away (auto-fix, LWW), in the background.
 dbRouter.onTransition((t) => {
@@ -31,6 +33,10 @@ async function main() {
     logger.info(`Legacy Vault BACKUP API listening on port ${PORT} (${process.env.NODE_ENV || "development"})`);
   });
 
+  if (process.env.HA_SYNC_WORKER_EMBEDDED === "true") {
+    stopEmbeddedSyncWorker = startEmbeddedSyncWorker();
+  }
+
   // Shares the primary's Redis queue: BullMQ hands each sweep run to exactly one live worker, so
   // whichever backend is up runs it. Set INACTIVITY_WORKER_ENABLED=false to leave it to the primary.
   if (process.env.INACTIVITY_WORKER_ENABLED !== "false") {
@@ -47,6 +53,7 @@ async function main() {
 async function shutdown(signal) {
   logger.info(`${signal} received, shutting down gracefully...`);
   const finish = async () => {
+    if (stopEmbeddedSyncWorker) await stopEmbeddedSyncWorker();
     if (inactivityWorker) await inactivityWorker.close();
     await dbRouter.stop();
     logger.info("Shutdown complete.");
